@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient, User } from "@supabase/supabase-js";
+import Image from "next/image";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -52,7 +53,7 @@ export default function LoginPage() {
     e.preventDefault();
 
     const { data: { session }, error } = await supabase.auth.signInWithPassword({
-      email: username + "@example.com", // auto-generated emails
+      email: username + "@ucsd-fencing.edu", // match the email format from createUsers
       password,
     });
 
@@ -61,31 +62,71 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-20 p-6 border rounded shadow">
-      <h1 className="text-2xl mb-4">Team Login</h1>
-      
-      <form onSubmit={handleLogin} className="flex flex-col gap-4">
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          className="border p-2 rounded"
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="border p-2 rounded"
-          required
-        />
-        <button type="submit" className="bg-blue-600 text-white p-2 rounded">
-          Log In
-        </button>
-        {error && <p className="text-red-500">{error}</p>}
-      </form>
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md">
+        {/* Header with Logo/Icon */}
+        <div className="text-center mb-8">
+          <div className="mx-auto w-16 h-16 bg-blue-900 rounded-full flex items-center justify-center mb-4 overflow-hidden">
+            <Image
+              src="/fencing-logo.png"
+              alt="UCSD Fencing Logo"
+              width={64}
+              height={64}
+              className="rounded-full"
+              onError={() => {
+                // Fallback to SVG if image doesn't exist
+              }}
+            />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">UCSD Fencing</h1>
+          <p className="text-gray-600">Attendance Portal</p>
+        </div>
+        
+        <form onSubmit={handleLogin} className="space-y-6">
+          <div>
+            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-2">
+              Username
+            </label>
+            <input
+              id="username"
+              type="text"
+              placeholder="Enter your username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-900 focus:border-transparent transition duration-200 ease-in-out"
+              required
+            />
+          </div>
+          
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-900 focus:border-transparent transition duration-200 ease-in-out"
+              required
+            />
+          </div>
+          
+          <button 
+            type="submit" 
+            className="w-full bg-blue-900 hover:bg-blue-800 text-white font-semibold py-3 px-4 rounded-lg transition duration-200 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-900 focus:ring-opacity-50"
+          >
+            Sign In
+          </button>
+          
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              <p className="text-sm">{error}</p>
+            </div>
+          )}
+        </form>
+      </div>
     </div>
   );
 }

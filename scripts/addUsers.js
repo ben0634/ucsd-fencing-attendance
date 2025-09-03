@@ -10,21 +10,21 @@ const supabase = createClient(
 // Track usernames to avoid duplicates (optional, can fetch from Supabase if needed)
 const existingUsernames = new Set();
 
-function generateUsername(first, last) {
-  let username = (first[0] + last).toLowerCase();
+function generateUsername(firstName, lastName) {
+  let username = (firstName[0] + lastName).toLowerCase();
   let i = 1;
   while (existingUsernames.has(username)) {
     i++;
-    username = (first[0] + last + i).toLowerCase();
+    username = (firstName[0] + lastName + i).toLowerCase();
   }
   existingUsernames.add(username);
   return username;
 }
 
 // Create a single user
-async function addUser(first, last, password, role, squad_id) {
-  const username = generateUsername(first, last);
-  const email = `${username}@example.com`;
+async function addUser(firstName, lastName, password, role, squadId, weapon = "foil", gender = "male") {
+  const username = generateUsername(firstName, lastName);
+  const email = `${username}@ucsd-fencing.edu`; // Match createUsers email format
 
   // Check if user exists
   const { data: existingUsers } = await supabase.auth.admin.listUsers();
@@ -36,11 +36,20 @@ async function addUser(first, last, password, role, squad_id) {
   const { data, error } = await supabase.auth.admin.createUser({
     email,
     password,
-    user_metadata: { username, role, squad_id, first_name: first, last_name: last },
+    email_confirm: true, // Match createUsers
+    user_metadata: { 
+      firstName,    // Match createUsers field names
+      lastName,     // Match createUsers field names
+      username, 
+      role, 
+      squadId,      // Match createUsers field name
+      weapon,       // Add weapon field to match createUsers
+      gender        // Add gender field to match createUsers
+    },
   });
 
   if (error) console.error("Error:", error.message);
   else console.log("Created user:", username);
 }
 
-addUser("Henry", "Liang", "changeme", "coach", 6);
+addUser("Henry", "Liang", "changeme", "coach", 6, "epee", "male");

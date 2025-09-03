@@ -7,19 +7,17 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function confirmAllUsers() {
+async function listUsers() {
   const { data, error } = await supabase.auth.admin.listUsers();
   if (error) {
     console.error("Error listing users:", error.message);
     return;
   }
-  for (const user of data.users) {
-    const { error: confirmError } = await supabase.auth.admin.updateUserById(user.id, {
-      email_confirm: true
-    });
-    if (confirmError) console.error(`Error confirming ${user.id}:`, confirmError.message);
-    else console.log(`Confirmed user ${user.id}`);
-  }
+  
+  console.log("Users in database:");
+  data.users.forEach(user => {
+    console.log(`ID: ${user.id}, Email: ${user.email}, Username: ${user.user_metadata?.username || 'N/A'}`);
+  });
 }
 
-confirmAllUsers();
+listUsers();

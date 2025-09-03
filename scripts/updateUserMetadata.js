@@ -8,15 +8,17 @@ const supabase = createClient(
 );
 
 // Replace with the Supabase user ID you want to edit
-const userId = "43305218-8d20-4d6a-beac-7026071910b0";
+const userId = "87dd3c5c-5d27-4782-a863-e36ed4aaff2a"; // araja user ID
 
-// Update the metadata here
+// Update the metadata here to match createUsers.js format
 const newMetadata = {
-  username: "araja",    // optional, can leave unchanged
-  role: "captain",     // "athlete", "captain", or "coach"
-  squad_id: 3,         // squad number
-  first_name: "Arnav",
-  last_name: "Raja"
+  firstName: "Arnav",    // changed from first_name to match createUsers
+  lastName: "Raja",      // changed from last_name to match createUsers
+  username: "araja",     
+  role: "coach",         // "athlete", "captain", or "coach"
+  squadId: 3,           // changed from squad_id to squadId to match createUsers
+  weapon: "epee",       // add weapon field to match createUsers
+  gender: "male"        // add gender field to match createUsers
 };
 
 async function updateMetadata() {

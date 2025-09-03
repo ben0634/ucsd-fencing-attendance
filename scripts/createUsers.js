@@ -1,74 +1,64 @@
+// scripts/createUsers.js
 import fs from "fs";
+import { parse } from "csv-parse";
 import { createClient } from "@supabase/supabase-js";
-import csvParser from "csv-parser";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// Supabase client using Service Role key
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Track usernames to avoid duplicates
-const existingUsernames = new Set();
+// Path to your CSV file
+const csvFilePath = "./team.csv";
 
-// Function to generate username from first + last name
-function generateUsername(first, last) {
-  let username = (first[0] + last).toLowerCase();
+// Function to generate username: first initial + last name
+const generateUsername = (firstName, lastName) =>
+  `${firstName[0].toLowerCase()}${lastName.toLowerCase()}`;
 
-  // Handle duplicates
-  let i = 1;
-  while (existingUsernames.has(username)) {
-    i++;
-    username = (first[0] + last + i).toLowerCase();
-  }
+const createUsers = async () => {
+  const parser = fs.createReadStream(csvFilePath).pipe(
+    parse({
+      columns: true,
+      skip_empty_lines: true,
+    })
+  );
 
-  existingUsernames.add(username);
-  return username;
-}
+  for await (const record of parser) {
+    const { firstName, lastName, password, role, squad_id, weapon, gender } =
+      record;
 
-// Function to create a Supabase user
-async function createUser({ first_name, last_name, password, role, squad_id }) {
-  try {
-    if (!first_name || !last_name) {
-      console.error(`Missing name for user:`, { first_name, last_name });
-      return;
-    }
-    const full_name = `${first_name} ${last_name}`;
-    const username = generateUsername(first_name, last_name);
-    const email = `${username}@example.com`; // required by Supabase
+    const username = generateUsername(firstName, lastName);
 
-    const { data, error } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      user_metadata: { username, role, squad_id, full_name },
-    });
+    try {
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: `${username}@ucsd-fencing.edu`, // placeholder email
+        password: password,
+        email_confirm: true,
+        user_metadata: {
+          firstName,
+          lastName,
+          username,
+          role,
+          squadId: squad_id,
+          weapon,
+          gender,
+        },
+      });
 
-    if (error) {
-      console.error(`Error creating ${username}:`, error.message);
-    } else {
-      console.log(`Created user: ${username}`);
-    }
-  } catch (err) {
-    console.error(`Unexpected error for ${first_name} ${last_name}:`, err.message);
-  }
-}
-
-// Read CSV and create users
-function readCSVAndCreateUsers() {
-  const users = [];
-  fs.createReadStream("team.csv")
-    .pipe(csvParser())
-    .on("data", (row) => users.push(row))
-    .on("end", async () => {
-      console.log(`Read ${users.length} users from CSV`);
-      for (const user of users) {
-        await createUser(user);
+      if (error) {
+        console.error(`Error creating ${username}:`, error.message);
+      } else {
+        console.log(`Created user: ${username}`);
       }
-      console.log("All users created!");
-    });
-}
+    } catch (err) {
+      console.error(`Failed for ${username}:`, err);
+    }
+  }
 
-readCSVAndCreateUsers();
+  console.log("All users processed.");
+};
+
+createUsers();
