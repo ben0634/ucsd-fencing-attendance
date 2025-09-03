@@ -46,7 +46,4 @@ table td, table th {
   color: #111827 !important; /* gray-900 - very dark */
 }
 
-/* Make headings darker and more readable */
-h1, h2, h3, h4, h5, h6 {
-  color: #111827 !important; /* gray-900 - very dark */
-}
+/* Remove the heading color override to allow custom colors */

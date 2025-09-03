@@ -35,20 +35,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Captain missing weapon or gender' }, { status: 400 });
     }
 
-    // Fetch athletes from the same squad using service role
-    const { data: squadAthletes, error } = await supabase
+    // Fetch all squad members (athletes + captain) from the same squad using service role
+    const { data: squadMembers, error } = await supabase
       .from('users')
       .select('*')
-      .eq('role', 'athlete')
+      .in('role', ['athlete', 'captain'])
       .eq('weapon', weapon)
-      .eq('gender', gender);
+      .eq('gender', gender)
+      .order('role', { ascending: true }) // Show athletes first, then captain
+      .order('full_name', { ascending: true });
 
     if (error) {
-      console.error('Error fetching squad athletes:', error);
+      console.error('Error fetching squad members:', error);
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
-    return NextResponse.json({ athletes: squadAthletes || [] });
+    return NextResponse.json({ athletes: squadMembers || [] });
     
   } catch (error) {
     console.error('API error:', error);

@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabaseClient";
 
 export default function AthleteDashboard() {
-  const [userName, setUserName] = useState("");
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [currentWeekOffset, setCurrentWeekOffset] = useState(0); // 0 = current week, -1 = last week, 1 = next week
+  const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
+  const [attendanceData, setAttendanceData] = useState<any[]>([]);
   const router = useRouter();
 
   // Get current week's dates with offset
@@ -59,26 +61,59 @@ export default function AthleteDashboard() {
     setCurrentWeekOffset(0);
   };
 
+  const fetchAttendanceData = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      
+      if (!accessToken) return;
+
+      const weekDates = getWeekDates();
+      const startDate = weekDates[0].toISOString().split('T')[0];
+      const endDate = weekDates[weekDates.length - 1].toISOString().split('T')[0];
+
+      const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const { attendance } = await response.json();
+        setAttendanceData(attendance || []);
+      }
+    } catch (error) {
+      console.error('Error fetching attendance data:', error);
+    }
+  };
+
+  const getAttendanceStatus = (date: Date) => {
+    const dateString = date.toISOString().split('T')[0];
+    const record = attendanceData.find((a) => a.date === dateString);
+    return record?.status || null;
+  };
+
+  // Fetch attendance data when week changes
   useEffect(() => {
-    async function fetchUser() {
+    if (user) {
+      fetchAttendanceData();
+    }
+  }, [currentWeekOffset, user]);
+
+  useEffect(() => {
+    async function checkUser() {
       const { data, error } = await supabase.auth.getUser();
       if (error || !data.user) {
         router.push("/"); // kick back to login
         return;
       }
 
-      // try firstName + lastName from metadata, else fallback
-      const meta = data.user.user_metadata || {};
-      const displayName =
-        meta.firstName && meta.lastName
-          ? `${meta.firstName} ${meta.lastName}`
-          : meta.username || data.user.email?.split("@")[0];
-
-      setUserName(displayName);
+      setUser(data.user);
       setLoading(false);
     }
 
-    fetchUser();
+    checkUser();
   }, [router]);
 
   const handleLogout = async () => {
@@ -92,7 +127,16 @@ export default function AthleteDashboard() {
     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-6">
       <div className="max-w-screen-lg mx-auto">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-xl font-bold text-white">Welcome, {userName}!</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-yellow-300 mb-1">
+              Welcome, {user?.user_metadata?.firstName ? 
+                `${user.user_metadata.firstName} ${user.user_metadata.lastName}` :
+                user?.user_metadata?.username || user?.email?.split("@")[0]}!
+            </h1>
+            <p className="text-yellow-100 text-base font-semibold">
+              Squad: {user?.user_metadata?.gender === 'male' ? "Men's" : user?.user_metadata?.gender === 'female' ? "Women's" : user?.user_metadata?.gender} {user?.user_metadata?.weapon?.charAt(0).toUpperCase() + user?.user_metadata?.weapon?.slice(1)}
+            </p>
+          </div>
           <button
             onClick={handleLogout}
             className="px-3 py-1 bg-red-500 text-white rounded"
@@ -111,7 +155,7 @@ export default function AthleteDashboard() {
               ← Previous Week
             </button>
             
-            <h2 className="text-lg font-semibold">
+            <h2 className="text-lg font-semibold text-gray-900">
               {currentWeekOffset === 0 ? "This Week's" : 
                currentWeekOffset === -1 ? "Last Week's" :
                currentWeekOffset === 1 ? "Next Week's" :
@@ -139,20 +183,41 @@ export default function AthleteDashboard() {
           <table className="w-full border">
             <thead>
               <tr className="bg-gray-100">
-                <th className="p-2 border">Day</th>
-                <th className="p-2 border">Status</th>
+                <th className="p-2 border text-gray-900 font-bold text-base">Day</th>
+                <th className="p-2 border text-gray-900 font-bold text-base">Status</th>
               </tr>
             </thead>
             <tbody>
               {dayNames.map((dayName, index) => {
                 const isWeekend = dayName === "Saturday" || dayName === "Sunday";
+                const currentDate = weekDates[index];
+                const status = getAttendanceStatus(currentDate);
+                
                 return (
                   <tr key={dayName}>
-                    <td className="p-2 border">
-                      {dayName} ({formatDate(weekDates[index])})
+                    <td className="p-2 border text-gray-900 font-semibold">
+                      {dayName} ({formatDate(currentDate)})
                     </td>
-                    <td className="p-2 border text-center">
-                      {isWeekend ? "X" : "-"}
+                    <td className="p-2 border text-center text-gray-900">
+                      {isWeekend ? (
+                        <span className="text-gray-400">No Practice</span>
+                      ) : status ? (
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          status === 'on-time' ? 'bg-green-100 text-green-800' :
+                          status === 'late' ? 'bg-yellow-100 text-yellow-800' :
+                          status === 'late-justified' ? 'bg-yellow-100 text-yellow-800' :
+                          status === 'excused' ? 'bg-blue-100 text-blue-800' :
+                          'bg-red-100 text-red-800'
+                        }`}>
+                          {status === 'on-time' ? 'On Time' :
+                           status === 'late' ? 'Late' :
+                           status === 'late-justified' ? 'Late (Justified)' :
+                           status === 'excused' ? 'Excused' :
+                           'Missing'}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">Not Marked</span>
+                      )}
                     </td>
                   </tr>
                 );

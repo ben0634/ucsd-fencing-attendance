@@ -9,6 +9,10 @@ export default function CaptainDashboard() {
   const [athletes, setAthletes] = useState<any[]>([]); // Changed to any[] for users table
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [attendanceData, setAttendanceData] = useState<any[]>([]);
+  const [markingAttendance, setMarkingAttendance] = useState<{[key: string]: boolean}>({});
+  const [message, setMessage] = useState<string>('');
+  const [viewMode, setViewMode] = useState<'mark' | 'view'>('mark'); // 'mark' for marking others, 'view' for viewing own
   const router = useRouter();
 
   // Get current week's dates with offset (same as athlete dashboard)
@@ -56,8 +60,59 @@ export default function CaptainDashboard() {
     setCurrentWeekOffset(currentWeekOffset + 1);
   };
 
+  // Fetch attendance data when week changes, view mode changes, or after marking attendance
+  useEffect(() => {
+    if (user && user.user_metadata.role === 'captain') {
+      fetchAttendanceData();
+    }
+  }, [currentWeekOffset, user, viewMode]);
+
   const goToCurrentWeek = () => {
     setCurrentWeekOffset(0);
+  };
+
+  const fetchAttendanceData = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      
+      if (!accessToken) return;
+
+      const weekDates = getWeekDates();
+      const startDate = weekDates[0].toISOString().split('T')[0];
+      const endDate = weekDates[weekDates.length - 1].toISOString().split('T')[0];
+
+      let url = `/api/attendance?startDate=${startDate}&endDate=${endDate}`;
+      
+      // If viewing own attendance, filter by current user
+      if (viewMode === 'view' && user) {
+        url += `&athleteId=${user.id}`;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const { attendance } = await response.json();
+        setAttendanceData(attendance || []);
+      } else {
+        console.error('Error fetching attendance:', response.status, response.statusText);
+      }
+    } catch (error) {
+      console.error('Error fetching attendance data:', error);
+    }
+  };
+
+  const getAttendanceStatus = (athleteId: string, date: Date) => {
+    const dateString = date.toISOString().split('T')[0];
+    const record = attendanceData.find(
+      (a) => a.athlete_id === athleteId && a.date === dateString
+    );
+    return record?.status || null;
   };
 
   useEffect(() => {
@@ -115,6 +170,9 @@ export default function CaptainDashboard() {
           console.log('Number of athletes:', athletes?.length || 0);
           setAthletes(athletes || []);
           console.log('Athletes state updated to:', athletes?.length || 0, 'athletes');
+          
+          // Fetch attendance data after getting athletes
+          await fetchAttendanceData();
         }
         
       } catch (error) {
@@ -134,27 +192,79 @@ export default function CaptainDashboard() {
   };
 
   const markAttendance = async (athleteId: string, date: Date, status: string) => {
-    try {
-      const { error } = await supabase
-        .from('attendance')
-        .upsert({
-          athlete_id: athleteId,
-          date: date.toISOString().split('T')[0], // Format as YYYY-MM-DD
-          status: status,
-          marked_by: user?.id
-        }, {
-          onConflict: 'athlete_id,date'
-        });
+    const key = `${athleteId}-${date.toISOString().split('T')[0]}`;
+    setMarkingAttendance(prev => ({ ...prev, [key]: true }));
+    setMessage('');
 
-      if (error) {
-        console.error('Error marking attendance:', error);
-        alert('Error marking attendance. Please try again.');
-      } else {
-        console.log('Attendance marked successfully');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      
+      if (!accessToken) {
+        throw new Error('No access token available');
       }
+
+      const response = await fetch('/api/attendance', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          athleteId,
+          date: date.toISOString(),
+          status
+        })
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to mark attendance');
+      }
+
+      // Show success message
+      setMessage(result.message || 'Attendance marked successfully');
+      
+      // Immediately update the attendance data in state to reflect the change
+      // This ensures the UI updates instantly before the API refetch completes
+      const dateString = date.toISOString().split('T')[0];
+      setAttendanceData(prevData => {
+        const existingIndex = prevData.findIndex(
+          a => a.athlete_id === athleteId && a.date === dateString
+        );
+        
+        const newRecord = {
+          athlete_id: athleteId,
+          date: dateString,
+          status: status,
+          marked_by: user?.id,
+          updated_at: new Date().toISOString()
+        };
+        
+        if (existingIndex >= 0) {
+          // Update existing record
+          const newData = [...prevData];
+          newData[existingIndex] = { ...newData[existingIndex], ...newRecord };
+          return newData;
+        } else {
+          // Add new record
+          return [...prevData, newRecord];
+        }
+      });
+      
+      // Also refresh attendance data from server to ensure consistency
+      await fetchAttendanceData();
+
+      // Clear message after 3 seconds
+      setTimeout(() => setMessage(''), 3000);
+
     } catch (error) {
-      console.error('Unexpected error:', error);
-      alert('Unexpected error. Please try again.');
+      console.error('Error marking attendance:', error);
+      setMessage(`Error: ${error instanceof Error ? error.message : 'Failed to mark attendance'}`);
+      setTimeout(() => setMessage(''), 5000);
+    } finally {
+      setMarkingAttendance(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -167,21 +277,38 @@ export default function CaptainDashboard() {
       <div className="max-w-screen-lg mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-xl font-bold text-white">Welcome, Captain {user.user_metadata.firstName ?? user.email}</h1>
-            <p className="text-blue-200 text-sm">
+            <h1 className="text-2xl font-bold text-yellow-300 mb-1">Welcome, Captain {user.user_metadata.firstName ?? user.email}</h1>
+            <p className="text-yellow-100 text-base font-semibold">
               Squad: {user.user_metadata?.gender === 'male' ? "Men's" : user.user_metadata?.gender === 'female' ? "Women's" : user.user_metadata?.gender} {user.user_metadata?.weapon?.charAt(0).toUpperCase() + user.user_metadata?.weapon?.slice(1)}
             </p>
           </div>
-          <button
-            onClick={handleLogout}
-            className="px-3 py-1 bg-red-500 text-white rounded"
-          >
-            Logout
-          </button>
+          <div className="flex gap-3 items-center">
+            <button
+              onClick={() => setViewMode(viewMode === 'mark' ? 'view' : 'mark')}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+            >
+              {viewMode === 'mark' ? 'My Attendance' : 'Mark Attendance'}
+            </button>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
+            >
+              Logout
+            </button>
+          </div>
         </div>
 
-        {/* Attendance Marking Interface */}
+        {/* Attendance Interface */}
         <div className="border rounded p-4 bg-white shadow">
+          {message && (
+            <div className={`mb-4 p-3 rounded ${
+              message.startsWith('Error') 
+                ? 'bg-red-100 text-red-700 border border-red-300' 
+                : 'bg-green-100 text-green-700 border border-green-300'
+            }`}>
+              {message}
+            </div>
+          )}
           <div className="flex items-center justify-between mb-3">
             <button
               onClick={goToPreviousWeek}
@@ -190,8 +317,8 @@ export default function CaptainDashboard() {
               ← Previous Week
             </button>
             
-            <h2 className="text-lg font-semibold">
-              Mark Attendance - {currentWeekOffset === 0 ? "This Week" : 
+            <h2 className="text-lg font-semibold text-gray-900">
+              {viewMode === 'mark' ? 'Mark Attendance' : 'My Attendance'} - {currentWeekOffset === 0 ? "This Week" : 
                currentWeekOffset === -1 ? "Last Week" :
                currentWeekOffset === 1 ? "Next Week" :
                currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
@@ -216,68 +343,151 @@ export default function CaptainDashboard() {
             </div>
           </div>
 
-          {athletes.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <p>No athletes found. Make sure you have created athlete accounts.</p>
-              <p className="text-sm mt-2">Run: <code>node scripts/createUsers.js</code></p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {dayNames.map((dayName, dayIndex) => {
-                const isWeekend = dayName === "Saturday" || dayName === "Sunday";
-                const currentDate = weekDates[dayIndex];
-                
-                if (isWeekend) {
-                  return (
-                    <div key={dayName} className="border rounded p-3 bg-gray-50">
-                      <h3 className="font-medium text-gray-600">
-                        {dayName} ({formatDate(currentDate)}) - No Practice
-                      </h3>
-                    </div>
-                  );
-                }
+          {viewMode === 'mark' && (
+            // Mark Attendance Mode - Show athletes in squad
+            athletes.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No athletes found. Make sure you have created athlete accounts.</p>
+                <p className="text-sm mt-2">Run: <code>node scripts/createUsers.js</code></p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {dayNames.map((dayName, dayIndex) => {
+                  const isWeekend = dayName === "Saturday" || dayName === "Sunday";
+                  const currentDate = weekDates[dayIndex];
+                  
+                  if (isWeekend) {
+                    return (
+                      <div key={dayName} className="border rounded p-3 bg-gray-50">
+                        <h3 className="font-bold text-lg text-gray-600">
+                          {dayName} ({formatDate(currentDate)}) - No Practice
+                        </h3>
+                      </div>
+                    );
+                  }
 
-                return (
-                  <div key={dayName} className="border rounded p-3">
-                    <h3 className="font-medium mb-3">
-                      {dayName} ({formatDate(currentDate)})
-                    </h3>
-                    
-                    <div className="grid gap-2">
-                      {athletes.map((athlete) => (
-                        <div key={athlete.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                          <span className="font-medium text-gray-900">
-                            {athlete.full_name || `${athlete.first_name} ${athlete.last_name}`.trim() || athlete.username}
-                          </span>
+                  return (
+                    <div key={dayName} className="border rounded p-3">
+                      <h3 className="font-bold text-lg mb-3 text-gray-900">
+                        {dayName} ({formatDate(currentDate)})
+                      </h3>
+                      
+                      <div className="grid gap-2">
+                        {athletes.map((athlete) => {
+                          const currentStatus = getAttendanceStatus(athlete.id, currentDate);
+                          const markingKey = `${athlete.id}-${currentDate.toISOString().split('T')[0]}`;
+                          const isMarking = markingAttendance[markingKey];
                           
-                          <div className="flex gap-2">
-                            {['on-time', 'late', 'late-justified', 'excused', 'missing'].map((status) => (
-                              <button
-                                key={status}
-                                onClick={() => markAttendance(athlete.id, currentDate, status)}
-                                className={`px-2 py-1 rounded text-xs font-medium ${
-                                  status === 'on-time' ? 'bg-green-500 hover:bg-green-600 text-white' :
-                                  status === 'late' ? 'bg-yellow-500 hover:bg-yellow-600 text-white' :
-                                  status === 'late-justified' ? 'bg-yellow-600 hover:bg-yellow-700 text-white' :
-                                  status === 'excused' ? 'bg-blue-500 hover:bg-blue-600 text-white' :
-                                  'bg-red-500 hover:bg-red-600 text-white'
-                                }`}
-                              >
-                                {status === 'on-time' ? 'On Time' :
-                                 status === 'late' ? 'Late' :
-                                 status === 'late-justified' ? 'Late (J)' :
-                                 status === 'excused' ? 'Excused' :
-                                 'Missing'}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+                          return (
+                            <div key={athlete.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                              <div className="flex-1">
+                                <span className="font-medium text-gray-900">
+                                  {athlete.full_name || `${athlete.first_name} ${athlete.last_name}`.trim() || athlete.username}
+                                  {athlete.role === 'captain' && <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Captain 🔱</span>}
+                                </span>
+                                {currentStatus && (
+                                  <div className="text-xs text-gray-600 mt-1">
+                                    Current: <span className={`font-medium ${
+                                      currentStatus === 'on-time' ? 'text-green-600' :
+                                      currentStatus === 'late' || currentStatus === 'late-justified' ? 'text-yellow-600' :
+                                      currentStatus === 'excused' ? 'text-blue-600' :
+                                      'text-red-600'
+                                    }`}>
+                                      {currentStatus === 'on-time' ? 'On Time' :
+                                       currentStatus === 'late' ? 'Late' :
+                                       currentStatus === 'late-justified' ? 'Late (Justified)' :
+                                       currentStatus === 'excused' ? 'Excused' :
+                                       'Missing'}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              <div className="flex gap-2">
+                                {isMarking && (
+                                  <div className="text-sm text-gray-500 mr-2">Updating...</div>
+                                )}
+                                {['on-time', 'late', 'late-justified', 'excused', 'missing'].map((status) => (
+                                  <button
+                                    key={status}
+                                    onClick={() => markAttendance(athlete.id, currentDate, status)}
+                                    disabled={isMarking}
+                                    className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                                      currentStatus === status 
+                                        ? 'ring-2 ring-blue-300 ' 
+                                        : ''
+                                    }${
+                                      status === 'on-time' ? 'bg-green-500 hover:bg-green-600 text-white' :
+                                      status === 'late' ? 'bg-yellow-500 hover:bg-yellow-600 text-white' :
+                                      status === 'late-justified' ? 'bg-yellow-600 hover:bg-yellow-700 text-white' :
+                                      status === 'excused' ? 'bg-blue-500 hover:bg-blue-600 text-white' :
+                                      'bg-red-500 hover:bg-red-600 text-white'
+                                    }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                  >
+                                    {status === 'on-time' ? 'On Time' :
+                                     status === 'late' ? 'Late' :
+                                     status === 'late-justified' ? 'Late (J)' :
+                                     status === 'excused' ? 'Excused' :
+                                     'Missing'}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );              })}
             </div>
+            )
+          )}
+
+          {viewMode === 'view' && (
+            // My Attendance Mode - Show personal attendance calendar like athlete dashboard
+            <table className="w-full border">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="p-2 border text-gray-900 font-bold text-base">Day</th>
+                  <th className="p-2 border text-gray-900 font-bold text-base">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dayNames.map((dayName, index) => {
+                  const isWeekend = dayName === "Saturday" || dayName === "Sunday";
+                  const currentDate = weekDates[index];
+                  const status = getAttendanceStatus(user.id, currentDate);
+                  
+                  return (
+                    <tr key={dayName}>
+                      <td className="p-2 border text-gray-900 font-semibold">
+                        {dayName} ({formatDate(currentDate)})
+                      </td>
+                      <td className="p-2 border text-center text-gray-900">
+                        {isWeekend ? (
+                          <span className="text-gray-400">No Practice</span>
+                        ) : status ? (
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            status === 'on-time' ? 'bg-green-100 text-green-800' :
+                            status === 'late' ? 'bg-yellow-100 text-yellow-800' :
+                            status === 'late-justified' ? 'bg-yellow-100 text-yellow-800' :
+                            status === 'excused' ? 'bg-blue-100 text-blue-800' :
+                            'bg-red-100 text-red-800'
+                          }`}>
+                            {status === 'on-time' ? 'On Time' :
+                             status === 'late' ? 'Late' :
+                             status === 'late-justified' ? 'Late (Justified)' :
+                             status === 'excused' ? 'Excused' :
+                             'Missing'}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">Not Marked</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
       </div>
