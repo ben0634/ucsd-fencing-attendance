@@ -52,4 +52,4 @@ async function addUser(firstName, lastName, password, role, squadId, weapon = "f
   else console.log("Created user:", username);
 }
 
-addUser("Henry", "Liang", "changeme", "coach", 6, "epee", "male");
+addUser("Kevin", "Kim", "changeme", "athlete", 32, "epee", "male");

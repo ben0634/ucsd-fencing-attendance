@@ -10,6 +10,9 @@ export default function AthleteDashboard() {
   const [loading, setLoading] = useState(true);
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
   const [attendanceData, setAttendanceData] = useState<any[]>([]);
+  const [practiceSchedules, setPracticeSchedules] = useState<{[key: string]: string[]}>({});
+  const [customNoPracticeDays, setCustomNoPracticeDays] = useState<{[key: string]: string[]}>({});
+  const [customPracticeDays, setCustomPracticeDays] = useState<{[key: string]: string[]}>({});
   const router = useRouter();
 
   // Get current week's dates with offset
@@ -88,16 +91,80 @@ export default function AthleteDashboard() {
     }
   };
 
+  const fetchPracticeSchedules = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      
+      if (!accessToken) return;
+
+      const response = await fetch('/api/practice-schedule', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const { schedules } = await response.json();
+        const scheduleMap: {[key: string]: string[]} = {};
+        const customNoPracticeMap: {[key: string]: string[]} = {};
+        const customPracticeMap: {[key: string]: string[]} = {};
+        
+        schedules?.forEach((schedule: any) => {
+          scheduleMap[schedule.squad_id] = schedule.practice_days || [];
+          customNoPracticeMap[schedule.squad_id] = schedule.custom_no_practice_days || [];
+          customPracticeMap[schedule.squad_id] = schedule.custom_practice_days || [];
+        });
+        
+        setPracticeSchedules(scheduleMap);
+        setCustomNoPracticeDays(customNoPracticeMap);
+        setCustomPracticeDays(customPracticeMap);
+      }
+    } catch (error) {
+      console.error('Error fetching practice schedules:', error);
+    }
+  };
+
   const getAttendanceStatus = (date: Date) => {
     const dateString = date.toISOString().split('T')[0];
     const record = attendanceData.find((a) => a.date === dateString);
     return record?.status || null;
   };
 
+  const hasPractice = (date: Date) => {
+    if (!user) return true; // Default to showing practice if we don't know
+    
+    const dateString = date.toISOString().split('T')[0];
+    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    const squadId = `${user.user_metadata?.gender}_${user.user_metadata?.weapon}`;
+    
+    // Check custom no-practice days first
+    const squadCustomNoPractice = customNoPracticeDays[squadId] || [];
+    const allTeamCustomNoPractice = customNoPracticeDays['all'] || [];
+    
+    if (squadCustomNoPractice.includes(dateString) || allTeamCustomNoPractice.includes(dateString)) {
+      return false;
+    }
+    
+    // Check custom practice days
+    const squadCustomPractice = customPracticeDays[squadId] || [];
+    const allTeamCustomPractice = customPracticeDays['all'] || [];
+    
+    if (squadCustomPractice.includes(dateString) || allTeamCustomPractice.includes(dateString)) {
+      return true;
+    }
+    
+    // Fall back to regular schedule
+    const squadSchedule = practiceSchedules[squadId] || [];
+    return squadSchedule.includes(dayName);
+  };
+
   // Fetch attendance data when week changes
   useEffect(() => {
     if (user) {
       fetchAttendanceData();
+      fetchPracticeSchedules();
     }
   }, [currentWeekOffset, user]);
 
@@ -192,6 +259,7 @@ export default function AthleteDashboard() {
                 const isWeekend = dayName === "Saturday" || dayName === "Sunday";
                 const currentDate = weekDates[index];
                 const status = getAttendanceStatus(currentDate);
+                const hasScheduledPractice = hasPractice(currentDate);
                 
                 return (
                   <tr key={dayName}>
@@ -199,8 +267,8 @@ export default function AthleteDashboard() {
                       {dayName} ({formatDate(currentDate)})
                     </td>
                     <td className="p-2 border text-center text-gray-900">
-                      {isWeekend ? (
-                        <span className="text-gray-400">No Practice</span>
+                      {isWeekend || !hasScheduledPractice ? (
+                        <span className="text-gray-500 font-semibold italic">No Practice</span>
                       ) : status ? (
                         <span className={`px-2 py-1 rounded text-xs font-medium ${
                           status === 'on-time' ? 'bg-green-100 text-green-800' :
@@ -216,7 +284,7 @@ export default function AthleteDashboard() {
                            'Missing'}
                         </span>
                       ) : (
-                        <span className="text-gray-400">Not Marked</span>
+                        <span className="text-gray-400 font-normal">Not Marked</span>
                       )}
                     </td>
                   </tr>

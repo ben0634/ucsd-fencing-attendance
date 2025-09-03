@@ -47,3 +47,110 @@ table td, table th {
 }
 
 /* Remove the heading color override to allow custom colors */
+
+/* Print Styles for Analytics Page */
+@media print {
+  /* Hide everything by default */
+  * {
+    visibility: hidden;
+  }
+  
+  /* Show only the analytics content */
+  .analytics-print-area,
+  .analytics-print-area * {
+    visibility: visible;
+  }
+  
+  /* Position the print area */
+  .analytics-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+  }
+  
+  /* Hide UI controls during print */
+  .print-controls,
+  .print-controls *,
+  button,
+  select {
+    display: none !important;
+    visibility: hidden !important;
+  }
+  
+  /* Remove background colors and shadows */
+  body {
+    background: white !important;
+  }
+  
+  .analytics-print-area {
+    background: white !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 20px !important;
+  }
+  
+  /* Table styling for print */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 8px !important;
+    margin: 0 !important;
+  }
+  
+  th, td {
+    border: 1px solid #000 !important;
+    padding: 2px 1px !important;
+    text-align: center !important;
+    vertical-align: middle !important;
+  }
+  
+  th {
+    background-color: #f3f4f6 !important;
+    font-weight: bold !important;
+    font-size: 7px !important;
+  }
+  
+  /* Header styling */
+  h2, h3 {
+    color: #000 !important;
+    margin: 10px 0 !important;
+  }
+  
+  /* Team member names - left align */
+  td:first-child {
+    text-align: left !important;
+    font-weight: bold !important;
+    min-width: 120px !important;
+  }
+  
+  /* Squad headers */
+  .bg-blue-50 {
+    background-color: #e0e7ff !important;
+  }
+  
+  .bg-blue-50 td {
+    background-color: #e0e7ff !important;
+    font-weight: bold !important;
+    text-align: center !important;
+  }
+  
+  /* Status colors for print */
+  .text-green-600 { color: #16a34a !important; }
+  .text-green-500 { color: #22c55e !important; }
+  .text-yellow-600 { color: #ca8a04 !important; }
+  .text-blue-600 { color: #2563eb !important; }
+  .text-red-600 { color: #dc2626 !important; }
+  .text-gray-600 { color: #6b7280 !important; }
+  
+  /* Page settings */
+  @page {
+    margin: 0.5in;
+    size: landscape;
+  }
+  
+  /* Remove overflow scrolling */
+  .overflow-x-auto {
+    overflow: visible !important;
+  }
+}

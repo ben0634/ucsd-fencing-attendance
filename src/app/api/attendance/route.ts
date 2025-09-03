@@ -22,8 +22,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
-    // Check if user is a captain
-    if (user.user_metadata?.role !== 'captain') {
+    // Check if user is a captain or coach
+    if (!['captain', 'coach'].includes(user.user_metadata?.role)) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
@@ -41,40 +41,50 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
     }
 
-    // Validate that the athlete is in the captain's squad
-    const captainWeapon = user.user_metadata?.weapon;
-    const captainGender = user.user_metadata?.gender;
+    // Validate athlete access based on role
+    let athleteData = null;
+    
+    if (user.user_metadata?.role === 'captain') {
+      // Captain validation - check squad membership
+      const captainWeapon = user.user_metadata?.weapon;
+      const captainGender = user.user_metadata?.gender;
 
-    if (!captainWeapon || !captainGender) {
-      return NextResponse.json({ error: 'Captain missing weapon or gender' }, { status: 400 });
-    }
-
-    // Check if the athlete exists and is in the same squad (or if captain is marking their own attendance)
-    const { data: athlete, error: athleteError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', athleteId)
-      .eq('weapon', captainWeapon)
-      .eq('gender', captainGender)
-      .in('role', ['athlete', 'captain']) // Allow both athletes and captains
-      .single();
-
-    // If not found in same squad, check if captain is marking their own attendance
-    if (athleteError || !athlete) {
-      if (athleteId === user.id) {
-        // Captain is marking their own attendance - this is allowed
-        // We'll use the captain's data instead
-        const captainData = {
-          id: user.id,
-          weapon: captainWeapon,
-          gender: captainGender,
-          role: 'captain'
-        };
-        
-        // Continue with the captain as the "athlete"
-      } else {
-        return NextResponse.json({ error: 'Athlete not found or not in your squad' }, { status: 404 });
+      if (!captainWeapon || !captainGender) {
+        return NextResponse.json({ error: 'Captain missing weapon or gender' }, { status: 400 });
       }
+
+      // Check if the athlete exists and is in the same squad (or if captain is marking their own attendance)
+      const { data: athlete, error: athleteError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', athleteId)
+        .eq('weapon', captainWeapon)
+        .eq('gender', captainGender)
+        .in('role', ['athlete', 'captain']) // Allow both athletes and captains
+        .single();
+
+      // If not found in same squad, check if captain is marking their own attendance
+      if (athleteError || !athlete) {
+        if (athleteId !== user.id) {
+          return NextResponse.json({ error: 'Athlete not found or not in your squad' }, { status: 404 });
+        }
+      } else {
+        athleteData = athlete;
+      }
+    } else if (user.user_metadata?.role === 'coach') {
+      // Coach validation - can mark attendance for any athlete/captain
+      const { data: athlete, error: athleteError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', athleteId)
+        .in('role', ['athlete', 'captain'])
+        .single();
+
+      if (athleteError || !athlete) {
+        return NextResponse.json({ error: 'Athlete not found' }, { status: 404 });
+      }
+      
+      athleteData = athlete;
     }
 
     // Parse and validate date
@@ -109,13 +119,13 @@ export async function POST(request: NextRequest) {
     // Determine the name for the success message
     let attendeeName = 'Unknown';
     if (athleteId === user.id) {
-      // Captain marking their own attendance
+      // User marking their own attendance
       attendeeName = user.user_metadata?.firstName ? 
         `${user.user_metadata.firstName} ${user.user_metadata.lastName}` :
         user.email?.split('@')[0] || 'You';
-    } else if (athlete) {
-      // Marking an athlete's attendance
-      attendeeName = athlete.full_name || athlete.username || 'Unknown';
+    } else if (athleteData) {
+      // Marking another athlete's attendance
+      attendeeName = athleteData.full_name || athleteData.username || 'Unknown';
     }
 
     return NextResponse.json({ 

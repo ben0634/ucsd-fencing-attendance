@@ -14,11 +14,35 @@ const supabase = createClient(
 // Path to your CSV file
 const csvFilePath = "./team.csv";
 
-// Function to generate username: first initial + last name
-const generateUsername = (firstName, lastName) =>
-  `${firstName[0].toLowerCase()}${lastName.toLowerCase()}`;
+// Function to generate username: first initial + last name, with collision handling
+const generateUsername = (firstName, lastName, existingUsernames) => {
+  let username = `${firstName[0].toLowerCase()}${lastName.toLowerCase()}`;
+  let counter = 1;
+  
+  // Handle collisions by adding a number suffix
+  while (existingUsernames.has(username)) {
+    counter++;
+    username = `${firstName[0].toLowerCase()}${lastName.toLowerCase()}${counter}`;
+  }
+  
+  existingUsernames.add(username);
+  return username;
+};
 
 const createUsers = async () => {
+  // Track existing usernames to prevent collisions
+  const existingUsernames = new Set();
+  
+  // First, get existing users to avoid conflicts
+  const { data: existingUsers } = await supabase.auth.admin.listUsers();
+  if (existingUsers && existingUsers.users) {
+    existingUsers.users.forEach(user => {
+      if (user.user_metadata && user.user_metadata.username) {
+        existingUsernames.add(user.user_metadata.username);
+      }
+    });
+  }
+
   const parser = fs.createReadStream(csvFilePath).pipe(
     parse({
       columns: true,
@@ -30,11 +54,18 @@ const createUsers = async () => {
     const { firstName, lastName, password, role, squad_id, weapon, gender } =
       record;
 
-    const username = generateUsername(firstName, lastName);
+    const username = generateUsername(firstName, lastName, existingUsernames);
+    const email = `${username}@ucsd-fencing.edu`;
+
+    // Skip if user already exists
+    if (existingUsers && existingUsers.users.find(u => u.email === email)) {
+      console.log(`User ${username} (${firstName} ${lastName}) already exists, skipping...`);
+      continue;
+    }
 
     try {
       const { data, error } = await supabase.auth.admin.createUser({
-        email: `${username}@ucsd-fencing.edu`, // placeholder email
+        email: email,
         password: password,
         email_confirm: true,
         user_metadata: {
@@ -49,12 +80,12 @@ const createUsers = async () => {
       });
 
       if (error) {
-        console.error(`Error creating ${username}:`, error.message);
+        console.error(`Error creating ${username} (${firstName} ${lastName}):`, error.message);
       } else {
-        console.log(`Created user: ${username}`);
+        console.log(`Created user: ${username} (${firstName} ${lastName})`);
       }
     } catch (err) {
-      console.error(`Failed for ${username}:`, err);
+      console.error(`Failed for ${username} (${firstName} ${lastName}):`, err);
     }
   }
 

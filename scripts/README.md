@@ -1,6 +1,28 @@
 # User Management Scripts
 
-This folder contains scripts to manage users for the UCSD Fencing attendance system.
+This folder contains scripts to manage users for the UCSDnode scripts/resetAttendanceData.js clear-test-data
+```
+
+## 🏃‍♂️ Practice Schedule Management
+
+### Set up practice schedules database:
+```bash
+# Run this SQL in your Supabase SQL Editor
+# File: scripts/SUPABASE_PRACTICE_SCHEDULES.sql
+```
+
+### Fix RLS policy conflicts (if you get recursion errors):
+```bash
+# Run this SQL in your Supabase SQL Editor  
+# File: scripts/fix-practice-schedules-rls.sql
+```
+
+### Insert sample practice data:
+```bash
+node scripts/insertSamplePracticeData.js
+```
+
+## 📁 Other Scriptscing attendance system.
 
 ## 📋 List Users
 
@@ -95,6 +117,9 @@ node scripts/resetAttendanceData.js clear-test-data
 - `verifyAttendanceTable.js` - Check attendance table setup
 - `clearAttendanceData.js` - Clear attendance data (⚠️ destructive)
 - `resetAttendanceData.js` - Granular attendance data management
+- `insertSamplePracticeData.js` - Insert sample practice schedule data
+- `SUPABASE_PRACTICE_SCHEDULES.sql` - Create practice schedules table
+- `fix-practice-schedules-rls.sql` - Fix RLS policy recursion issues
 
 ## 💡 Tips
 
