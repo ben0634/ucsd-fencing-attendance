@@ -1,12 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient, User } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { User } from "@supabase/supabase-js";
+import { supabase } from "../../lib/supabaseClient";
 
 export default function CoachDashboard() {
   const [user, setUser] = useState<User | null | undefined>(undefined);

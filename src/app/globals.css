@@ -28,3 +28,25 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Make placeholder text darker and more readable */
+input::placeholder {
+  color: #6b7280 !important; /* gray-500 - much darker than default */
+  opacity: 1 !important; /* override browser default opacity */
+}
+
+/* Ensure input text itself is dark */
+input[type="text"], 
+input[type="password"] {
+  color: #111827 !important; /* gray-900 - very dark */
+}
+
+/* Make table text darker and more readable */
+table td, table th {
+  color: #111827 !important; /* gray-900 - very dark */
+}
+
+/* Make headings darker and more readable */
+h1, h2, h3, h4, h5, h6 {
+  color: #111827 !important; /* gray-900 - very dark */
+}
