@@ -59,6 +59,14 @@ export default function CoachDashboard() {
     return `${formatDate(start)} - ${formatDate(end)}`;
   };
 
+  // Helper function to format date as YYYY-MM-DD in local timezone
+  const getLocalDateString = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const weekDates = getWeekDates();
   const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -144,8 +152,8 @@ export default function CoachDashboard() {
       if (!accessToken) return;
 
       const weekDates = getWeekDates();
-      const startDate = weekDates[0].toISOString().split('T')[0];
-      const endDate = weekDates[weekDates.length - 1].toISOString().split('T')[0];
+      const startDate = getLocalDateString(weekDates[0]);
+      const endDate = getLocalDateString(weekDates[weekDates.length - 1]);
 
       const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}`, {
         headers: {
@@ -175,8 +183,8 @@ export default function CoachDashboard() {
       const firstDay = new Date(selectedYear, selectedMonth, 1);
       const lastDay = new Date(selectedYear, selectedMonth + 1, 0);
       
-      const startDate = firstDay.toISOString().split('T')[0];
-      const endDate = lastDay.toISOString().split('T')[0];
+      const startDate = getLocalDateString(firstDay);
+      const endDate = getLocalDateString(lastDay);
 
       const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}`, {
         headers: {
@@ -214,7 +222,7 @@ export default function CoachDashboard() {
 
   // Check if there's practice for a squad on a given date (for analytics)
   const hasAnalyticsPractice = (squadId: string, date: Date) => {
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
     
     // Check custom no-practice days first
@@ -240,7 +248,7 @@ export default function CoachDashboard() {
 
   // Check if there's practice for a squad on a given date (for attendance marking)
   const hasPractice = (squadId: string, date: Date) => {
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
     
     // Check custom no-practice days first
@@ -272,7 +280,7 @@ export default function CoachDashboard() {
     }
     
     // If there is practice, get the actual attendance status
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
     const record = analyticsData.find(
       (a) => a.athlete_id === athleteId && a.date === dateString
     );
@@ -400,7 +408,7 @@ export default function CoachDashboard() {
   };
 
   const getAttendanceStatus = (athleteId: string, date: Date) => {
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
     const record = attendanceData.find(
       (a) => a.athlete_id === athleteId && a.date === dateString
     );
@@ -408,7 +416,7 @@ export default function CoachDashboard() {
   };
 
   const markAttendance = async (athleteId: string, date: Date, status: string) => {
-    const key = `${athleteId}-${date.toISOString().split('T')[0]}`;
+    const key = `${athleteId}-${getLocalDateString(date)}`;
     setMarkingAttendance(prev => ({ ...prev, [key]: true }));
     setMessage('');
 
@@ -620,11 +628,16 @@ export default function CoachDashboard() {
   // Helper function to generate date range
   const generateDateRange = (startDate: string, endDate: string): string[] => {
     const dates: string[] = [];
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    // Create dates in local timezone to avoid timezone shift issues
+    const start = new Date(startDate + 'T00:00:00');
+    const end = new Date(endDate + 'T00:00:00');
     
     for (let date = new Date(start); date <= end; date.setDate(date.getDate() + 1)) {
-      dates.push(date.toISOString().split('T')[0]);
+      // Use local date formatting instead of toISOString to avoid timezone conversion
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      dates.push(`${year}-${month}-${day}`);
     }
     
     return dates;
@@ -1118,7 +1131,7 @@ export default function CoachDashboard() {
                           <div className="grid gap-2">
                             {squad.members.map((member: any) => {
                               const currentStatus = getAttendanceStatus(member.id, currentDate);
-                              const markingKey = `${member.id}-${currentDate.toISOString().split('T')[0]}`;
+                              const markingKey = `${member.id}-${getLocalDateString(currentDate)}`;
                               const isMarking = markingAttendance[markingKey];
                               
                               return (

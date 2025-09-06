@@ -52,6 +52,14 @@ export default function CaptainDashboard() {
     return `${formatDate(start)} - ${formatDate(end)}`;
   };
 
+  // Helper function to format date as YYYY-MM-DD in local timezone
+  const getLocalDateString = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const weekDates = getWeekDates();
   const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -82,8 +90,8 @@ export default function CaptainDashboard() {
       if (!accessToken) return;
 
       const weekDates = getWeekDates();
-      const startDate = weekDates[0].toISOString().split('T')[0];
-      const endDate = weekDates[weekDates.length - 1].toISOString().split('T')[0];
+      const startDate = getLocalDateString(weekDates[0]);
+      const endDate = getLocalDateString(weekDates[weekDates.length - 1]);
 
       let url = `/api/attendance?startDate=${startDate}&endDate=${endDate}`;
       
@@ -111,7 +119,7 @@ export default function CaptainDashboard() {
   };
 
   const getAttendanceStatus = (athleteId: string, date: Date) => {
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
     const record = attendanceData.find(
       (a) => a.athlete_id === athleteId && a.date === dateString
     );
@@ -198,7 +206,7 @@ export default function CaptainDashboard() {
   };
 
   const markAttendance = async (athleteId: string, date: Date, status: string) => {
-    const key = `${athleteId}-${date.toISOString().split('T')[0]}`;
+    const key = `${athleteId}-${getLocalDateString(date)}`;
     setMarkingAttendance(prev => ({ ...prev, [key]: true }));
     setMessage('');
 
@@ -234,7 +242,7 @@ export default function CaptainDashboard() {
       
       // Immediately update the attendance data in state to reflect the change
       // This ensures the UI updates instantly before the API refetch completes
-      const dateString = date.toISOString().split('T')[0];
+      const dateString = getLocalDateString(date);
       setAttendanceData(prevData => {
         const existingIndex = prevData.findIndex(
           a => a.athlete_id === athleteId && a.date === dateString
@@ -314,7 +322,7 @@ export default function CaptainDashboard() {
   const hasPractice = (date: Date) => {
     if (!user) return true; // Default to showing practice if we don't know
     
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
     const squadId = `${user.user_metadata?.gender}_${user.user_metadata?.weapon}`;
     
@@ -424,21 +432,18 @@ export default function CaptainDashboard() {
             ) : (
               <div className="space-y-4">
                 {dayNames.map((dayName, dayIndex) => {
-                  const isWeekend = dayName === "Saturday" || dayName === "Sunday";
                   const currentDate = weekDates[dayIndex];
                   const hasScheduledPractice = hasPractice(currentDate);
                   
-                  if (isWeekend || !hasScheduledPractice) {
+                  if (!hasScheduledPractice) {
                     return (
                       <div key={dayName} className="border rounded p-3 bg-gray-50">
                         <h3 className="font-bold text-lg text-gray-600">
                           {dayName} ({formatDate(currentDate)}) - No Practice
                         </h3>
-                        {!hasScheduledPractice && !isWeekend && (
-                          <p className="text-sm text-gray-500 mt-1">
-                            Practice not scheduled for this day
-                          </p>
-                        )}
+                        <p className="text-sm text-gray-500 mt-1">
+                          Practice not scheduled for this day
+                        </p>
                       </div>
                     );
                   }
@@ -452,7 +457,7 @@ export default function CaptainDashboard() {
                       <div className="grid gap-2">
                         {athletes.map((athlete) => {
                           const currentStatus = getAttendanceStatus(athlete.id, currentDate);
-                          const markingKey = `${athlete.id}-${currentDate.toISOString().split('T')[0]}`;
+                          const markingKey = `${athlete.id}-${getLocalDateString(currentDate)}`;
                           const isMarking = markingAttendance[markingKey];
                           
                           return (
@@ -530,7 +535,6 @@ export default function CaptainDashboard() {
               </thead>
               <tbody>
                 {dayNames.map((dayName, index) => {
-                  const isWeekend = dayName === "Saturday" || dayName === "Sunday";
                   const currentDate = weekDates[index];
                   const status = getAttendanceStatus(user.id, currentDate);
                   const hasScheduledPractice = hasPractice(currentDate);
@@ -541,7 +545,7 @@ export default function CaptainDashboard() {
                         {dayName} ({formatDate(currentDate)})
                       </td>
                       <td className="p-2 border text-center text-gray-900">
-                        {isWeekend || !hasScheduledPractice ? (
+                        {!hasScheduledPractice ? (
                           <span className="text-gray-500 font-semibold italic">No Practice</span>
                         ) : status ? (
                           <span className={`px-2 py-1 rounded text-xs font-medium ${

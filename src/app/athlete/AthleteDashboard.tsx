@@ -49,6 +49,14 @@ export default function AthleteDashboard() {
     return `${formatDate(start)} - ${formatDate(end)}`;
   };
 
+  // Helper function to format date as YYYY-MM-DD in local timezone
+  const getLocalDateString = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const weekDates = getWeekDates();
   const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -72,8 +80,8 @@ export default function AthleteDashboard() {
       if (!accessToken) return;
 
       const weekDates = getWeekDates();
-      const startDate = weekDates[0].toISOString().split('T')[0];
-      const endDate = weekDates[weekDates.length - 1].toISOString().split('T')[0];
+      const startDate = getLocalDateString(weekDates[0]);
+      const endDate = getLocalDateString(weekDates[weekDates.length - 1]);
 
       const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}`, {
         headers: {
@@ -127,7 +135,7 @@ export default function AthleteDashboard() {
   };
 
   const getAttendanceStatus = (date: Date) => {
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
     const record = attendanceData.find((a) => a.date === dateString);
     return record?.status || null;
   };
@@ -135,7 +143,7 @@ export default function AthleteDashboard() {
   const hasPractice = (date: Date) => {
     if (!user) return true; // Default to showing practice if we don't know
     
-    const dateString = date.toISOString().split('T')[0];
+    const dateString = getLocalDateString(date);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
     const squadId = `${user.user_metadata?.gender}_${user.user_metadata?.weapon}`;
     
@@ -256,7 +264,6 @@ export default function AthleteDashboard() {
             </thead>
             <tbody>
               {dayNames.map((dayName, index) => {
-                const isWeekend = dayName === "Saturday" || dayName === "Sunday";
                 const currentDate = weekDates[index];
                 const status = getAttendanceStatus(currentDate);
                 const hasScheduledPractice = hasPractice(currentDate);
@@ -267,7 +274,7 @@ export default function AthleteDashboard() {
                       {dayName} ({formatDate(currentDate)})
                     </td>
                     <td className="p-2 border text-center text-gray-900">
-                      {isWeekend || !hasScheduledPractice ? (
+                      {!hasScheduledPractice ? (
                         <span className="text-gray-500 font-semibold italic">No Practice</span>
                       ) : status ? (
                         <span className={`px-2 py-1 rounded text-xs font-medium ${
