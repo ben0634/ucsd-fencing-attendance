@@ -356,31 +356,30 @@ export default function CaptainDashboard() {
       <div className="max-w-screen-lg mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-yellow-300 mb-1">Welcome, Captain {user.user_metadata.firstName ?? user.email}</h1>
-            <p className="text-yellow-100 text-base font-semibold">
+            <h1 className="text-3xl font-extrabold text-yellow-300 mb-2">Welcome, Captain {user.user_metadata.firstName ?? user.email}</h1>
+            <p className="text-yellow-100 text-lg font-medium">
               Squad: {user.user_metadata?.gender === 'male' ? "Men's" : user.user_metadata?.gender === 'female' ? "Women's" : user.user_metadata?.gender} {user.user_metadata?.weapon?.charAt(0).toUpperCase() + user.user_metadata?.weapon?.slice(1)}
             </p>
           </div>
-          <div className="flex gap-3 items-center">
+          <div className="flex gap-4 items-center">
             <button
               onClick={() => setViewMode(viewMode === 'mark' ? 'view' : 'mark')}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
             >
               {viewMode === 'mark' ? 'My Attendance' : 'Mark Attendance'}
             </button>
             <button
               onClick={handleLogout}
-              className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
+              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
             >
               Logout
             </button>
           </div>
         </div>
 
-        {/* Attendance Interface */}
-        <div className="border rounded p-4 bg-white shadow">
+        <div className="border rounded-lg p-6 bg-white shadow-lg">
           {message && (
-            <div className={`mb-4 p-3 rounded ${
+            <div className={`mb-4 p-4 rounded-lg text-center font-semibold ${
               message.startsWith('Error') 
                 ? 'bg-red-100 text-red-700 border border-red-300' 
                 : 'bg-green-100 text-green-700 border border-green-300'
@@ -388,34 +387,32 @@ export default function CaptainDashboard() {
               {message}
             </div>
           )}
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-4">
             <button
               onClick={goToPreviousWeek}
-              className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg shadow-md hover:bg-blue-600 transition-transform transform hover:scale-105"
             >
               ← Previous Week
             </button>
-            
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-xl font-bold text-gray-900">
               {viewMode === 'mark' ? 'Mark Attendance' : 'My Attendance'} - {currentWeekOffset === 0 ? "This Week" : 
                currentWeekOffset === -1 ? "Last Week" :
                currentWeekOffset === 1 ? "Next Week" :
                currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
                `${currentWeekOffset} Weeks Ahead`} ({formatWeekRange(weekDates)})
             </h2>
-            
-            <div className="flex gap-2">
+            <div className="flex gap-3">
               {currentWeekOffset !== 0 && (
                 <button
                   onClick={goToCurrentWeek}
-                  className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-sm"
+                  className="px-3 py-1 bg-gray-500 text-white rounded-lg shadow-md hover:bg-gray-600 transition-transform transform hover:scale-105 text-sm"
                 >
                   Current
                 </button>
               )}
               <button
                 onClick={goToNextWeek}
-                className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg shadow-md hover:bg-blue-600 transition-transform transform hover:scale-105"
               >
                 Next Week →
               </button>
@@ -423,21 +420,20 @@ export default function CaptainDashboard() {
           </div>
 
           {viewMode === 'mark' && (
-            // Mark Attendance Mode - Show athletes in squad
             athletes.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <p>No athletes found. Make sure you have created athlete accounts.</p>
                 <p className="text-sm mt-2">Run: <code>node scripts/createUsers.js</code></p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {dayNames.map((dayName, dayIndex) => {
                   const currentDate = weekDates[dayIndex];
                   const hasScheduledPractice = hasPractice(currentDate);
-                  
+
                   if (!hasScheduledPractice) {
                     return (
-                      <div key={dayName} className="border rounded p-3 bg-gray-50">
+                      <div key={dayName} className="border rounded-lg p-4 bg-gray-50">
                         <h3 className="font-bold text-lg text-gray-600">
                           {dayName} ({formatDate(currentDate)}) - No Practice
                         </h3>
@@ -449,19 +445,19 @@ export default function CaptainDashboard() {
                   }
 
                   return (
-                    <div key={dayName} className="border rounded p-3">
+                    <div key={dayName} className="border rounded-lg p-4">
                       <h3 className="font-bold text-lg mb-3 text-gray-900">
                         {dayName} ({formatDate(currentDate)})
                       </h3>
-                      
-                      <div className="grid gap-2">
+
+                      <div className="grid gap-4">
                         {athletes.map((athlete) => {
                           const currentStatus = getAttendanceStatus(athlete.id, currentDate);
                           const markingKey = `${athlete.id}-${getLocalDateString(currentDate)}`;
                           const isMarking = markingAttendance[markingKey];
-                          
+
                           return (
-                            <div key={athlete.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                            <div key={athlete.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg shadow-md">
                               <div className="flex-1">
                                 <span className="font-medium text-gray-900">
                                   {athlete.full_name || `${athlete.first_name} ${athlete.last_name}`.trim() || athlete.username}
@@ -485,7 +481,7 @@ export default function CaptainDashboard() {
                                 )}
                               </div>
                               
-                              <div className="flex gap-2">
+                              <div className="flex gap-3">
                                 {isMarking && (
                                   <div className="text-sm text-gray-500 mr-2">Updating...</div>
                                 )}
@@ -494,7 +490,7 @@ export default function CaptainDashboard() {
                                     key={status}
                                     onClick={() => markAttendance(athlete.id, currentDate, status)}
                                     disabled={isMarking}
-                                    className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-transform transform hover:scale-105 ${
                                       currentStatus === status 
                                         ? 'ring-2 ring-blue-300 ' 
                                         : ''
@@ -526,11 +522,11 @@ export default function CaptainDashboard() {
 
           {viewMode === 'view' && (
             // My Attendance Mode - Show personal attendance calendar like athlete dashboard
-            <table className="w-full border">
+            <table className="w-full border rounded-lg shadow-md">
               <thead>
                 <tr className="bg-gray-100">
-                  <th className="p-2 border text-gray-900 font-bold text-base">Day</th>
-                  <th className="p-2 border text-gray-900 font-bold text-base">Status</th>
+                  <th className="p-3 border text-gray-900 font-bold text-base">Day</th>
+                  <th className="p-3 border text-gray-900 font-bold text-base">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -538,17 +534,17 @@ export default function CaptainDashboard() {
                   const currentDate = weekDates[index];
                   const status = getAttendanceStatus(user.id, currentDate);
                   const hasScheduledPractice = hasPractice(currentDate);
-                  
+
                   return (
                     <tr key={dayName}>
-                      <td className="p-2 border text-gray-900 font-semibold">
+                      <td className="p-3 border text-gray-900 font-semibold">
                         {dayName} ({formatDate(currentDate)})
                       </td>
-                      <td className="p-2 border text-center text-gray-900">
+                      <td className="p-3 border text-center text-gray-900">
                         {!hasScheduledPractice ? (
                           <span className="text-gray-500 font-semibold italic">No Practice</span>
                         ) : status ? (
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          <span className={`px-3 py-1 rounded-lg text-xs font-medium ${
                             status === 'on-time' ? 'bg-green-100 text-green-800' :
                             status === 'late' ? 'bg-yellow-100 text-yellow-800' :
                             status === 'late-justified' ? 'bg-yellow-100 text-yellow-800' :
