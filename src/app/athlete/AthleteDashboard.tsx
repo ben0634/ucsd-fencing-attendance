@@ -13,6 +13,8 @@ export default function AthleteDashboard() {
   const [practiceSchedules, setPracticeSchedules] = useState<{[key: string]: string[]}>({});
   const [customNoPracticeDays, setCustomNoPracticeDays] = useState<{[key: string]: string[]}>({});
   const [customPracticeDays, setCustomPracticeDays] = useState<{[key: string]: string[]}>({});
+  // sessionType allows switching between practice and lift attendance views
+  const [sessionType, setSessionType] = useState<'practice' | 'lift'>('practice');
   const router = useRouter();
 
   // Get current week's dates with offset
@@ -83,7 +85,7 @@ export default function AthleteDashboard() {
       const startDate = getLocalDateString(weekDates[0]);
       const endDate = getLocalDateString(weekDates[weekDates.length - 1]);
 
-      const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}`, {
+      const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -105,8 +107,8 @@ export default function AthleteDashboard() {
       const accessToken = sessionData.session?.access_token;
       
       if (!accessToken) return;
-
-      const response = await fetch('/api/practice-schedule', {
+      // For now we reuse the same endpoint; in lift mode backend will later filter by sessionType
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -142,6 +144,13 @@ export default function AthleteDashboard() {
 
   const hasPractice = (date: Date) => {
     if (!user) return true; // Default to showing practice if we don't know
+
+    // In lift mode (temporary logic): until separate schedules exist, we treat lift as occurring
+    // on the same scheduled practice days. Later we will maintain distinct schedules.
+    if (sessionType === 'lift') {
+      // Placeholder: treat lift as scheduled on practice days; could be refined
+      // Optionally return true always to allow marking every day: return true;
+    }
     
     const dateString = getLocalDateString(date);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
@@ -212,12 +221,24 @@ export default function AthleteDashboard() {
               Squad: {user?.user_metadata?.gender === 'male' ? "Men's" : user?.user_metadata?.gender === 'female' ? "Women's" : user?.user_metadata?.gender} {user?.user_metadata?.weapon?.charAt(0).toUpperCase() + user?.user_metadata?.weapon?.slice(1)}
             </p>
           </div>
-          <button
-            onClick={handleLogout}
-            className="px-3 py-1 bg-red-500 text-white rounded"
-          >
-            Logout
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex bg-white/10 rounded-lg overflow-hidden border border-white/20 backdrop-blur-sm">
+              <button
+                onClick={() => setSessionType('practice')}
+                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'practice' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Practice</button>
+              <button
+                onClick={() => setSessionType('lift')}
+                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'lift' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Lift</button>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1 bg-red-500 text-white rounded"
+            >
+              Logout
+            </button>
+          </div>
         </div>
 
         {/* Modern Weekly Attendance Calendar */}
@@ -237,7 +258,7 @@ export default function AthleteDashboard() {
               
               <div className="text-center">
                 <h2 className="text-xl font-bold text-white">
-                  {currentWeekOffset === 0 ? "This Week's" : 
+                  {sessionType === 'practice' ? 'Practice' : 'Lift'} {currentWeekOffset === 0 ? "This Week's" : 
                    currentWeekOffset === -1 ? "Last Week's" :
                    currentWeekOffset === 1 ? "Next Week's" :
                    currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
@@ -384,6 +405,11 @@ export default function AthleteDashboard() {
           {/* Legend */}
           <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
             <div className="flex flex-wrap items-center justify-center gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="text-xs font-semibold px-2 py-1 rounded-full bg-gray-200 text-gray-600">
+                  {sessionType === 'practice' ? 'Practice Mode' : 'Lift Mode'}
+                </div>
+              </div>
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded-full bg-green-100 flex items-center justify-center">
                   <svg className="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">

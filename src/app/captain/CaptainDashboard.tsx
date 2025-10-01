@@ -16,6 +16,8 @@ export default function CaptainDashboard() {
   const [practiceSchedules, setPracticeSchedules] = useState<{[key: string]: string[]}>({});
   const [customNoPracticeDays, setCustomNoPracticeDays] = useState<{[key: string]: string[]}>({});
   const [customPracticeDays, setCustomPracticeDays] = useState<{[key: string]: string[]}>({});
+  // sessionType controls whether we are viewing/marking practice or lift attendance
+  const [sessionType, setSessionType] = useState<'practice' | 'lift'>('practice');
   const router = useRouter();
 
   // Get current week's dates with offset (same as athlete dashboard)
@@ -93,7 +95,7 @@ export default function CaptainDashboard() {
       const startDate = getLocalDateString(weekDates[0]);
       const endDate = getLocalDateString(weekDates[weekDates.length - 1]);
 
-      let url = `/api/attendance?startDate=${startDate}&endDate=${endDate}`;
+  let url = `/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`;
       
       // If viewing own attendance, filter by current user
       if (viewMode === 'view' && user) {
@@ -227,7 +229,8 @@ export default function CaptainDashboard() {
         body: JSON.stringify({
           athleteId,
           date: date.toISOString(),
-          status
+          status,
+          sessionType
         })
       });
 
@@ -290,7 +293,7 @@ export default function CaptainDashboard() {
       
       if (!accessToken) return;
 
-      const response = await fetch('/api/practice-schedule', {
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -362,6 +365,16 @@ export default function CaptainDashboard() {
             </p>
           </div>
           <div className="flex gap-4 items-center">
+            <div className="flex bg-white/10 rounded-lg overflow-hidden border border-white/20 backdrop-blur-sm">
+              <button
+                onClick={() => setSessionType('practice')}
+                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'practice' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Practice</button>
+              <button
+                onClick={() => setSessionType('lift')}
+                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'lift' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Lift</button>
+            </div>
             <button
               onClick={() => setViewMode(viewMode === 'mark' ? 'view' : 'mark')}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
@@ -397,7 +410,7 @@ export default function CaptainDashboard() {
                 ← Previous Week
               </button>
               <h2 className="text-xl font-bold text-gray-900">
-                {viewMode === 'mark' ? 'Mark Attendance' : 'My Attendance'} - {currentWeekOffset === 0 ? "This Week" : 
+           {sessionType === 'practice' ? 'Practice' : 'Lift'} {viewMode === 'mark' ? 'Mark Attendance' : 'My Attendance'} - {currentWeekOffset === 0 ? "This Week" : 
                  currentWeekOffset === -1 ? "Last Week" :
                  currentWeekOffset === 1 ? "Next Week" :
                  currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
@@ -540,12 +553,14 @@ export default function CaptainDashboard() {
                   </button>
                   <div className="text-center">
                     <h2 className="text-xl font-bold text-white">
-                      My Attendance - {currentWeekOffset === 0 ? "This Week" : 
+               {sessionType === 'practice' ? 'Practice' : 'Lift'} My Attendance - {currentWeekOffset === 0 ? "This Week" : 
                        currentWeekOffset === -1 ? "Last Week" :
                        currentWeekOffset === 1 ? "Next Week" :
                        currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
                        `${currentWeekOffset} Weeks Ahead`}
                     </h2>
+              {/* Mode Badge */}
+              <div className="px-6 -mt-2"><span className="inline-block text-xs font-semibold bg-gray-200 text-gray-600 rounded-full px-3 py-1">{sessionType === 'practice' ? 'Practice Mode' : 'Lift Mode'}</span></div>
                     <p className="text-blue-100 text-sm font-medium">
                       {formatWeekRange(weekDates)}
                     </p>

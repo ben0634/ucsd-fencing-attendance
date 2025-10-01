@@ -27,6 +27,8 @@ export default function CoachDashboard() {
   const [selectedCustomSquad, setSelectedCustomSquad] = useState<string>('all');
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
   const [customSpecificDates, setCustomSpecificDates] = useState<string[]>(['']);
+  // sessionType toggle for Practice vs Lift modes
+  const [sessionType, setSessionType] = useState<'practice' | 'lift'>('practice');
   const router = useRouter();
 
   // Get current week's dates with offset
@@ -796,7 +798,7 @@ export default function CoachDashboard() {
       fetchAnalyticsData();
       fetchPracticeSchedules();
     }
-  }, [currentWeekOffset, user, selectedMonth, selectedYear]);
+  }, [currentWeekOffset, user, selectedMonth, selectedYear, sessionType]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -817,72 +819,52 @@ export default function CoachDashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-6">
       <div className="max-w-screen-xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          {/* Left: Title & Mode Badge */}
           <div>
-            <h1 className="text-2xl font-bold text-yellow-300 mb-1">
+            <h1 className="text-2xl font-bold text-yellow-300 leading-tight">
               Welcome, Coach {user.user_metadata.firstName ?? user.email}
             </h1>
-            <p className="text-yellow-100 text-base font-semibold">
-              UCSD Fencing Team Management
-            </p>
+            <p className="text-yellow-100 text-sm font-semibold">UCSD Fencing Team Management</p>
+            <span className="inline-block mt-2 text-xs font-semibold px-2 py-1 rounded-full bg-gray-200 text-gray-700">
+              {sessionType === 'practice' ? 'Practice Mode' : 'Lift Mode'}
+            </span>
           </div>
-          <div className="flex gap-3 items-center">
-            <button
-              onClick={() => setViewMode('overview')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'overview' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Team Overview
-            </button>
-            <button
-              onClick={() => setViewMode('attendance')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'attendance' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Mark Attendance
-            </button>
-            <button
-              onClick={() => setViewMode('captains')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'captains' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Manage Captains
-            </button>
-            <button
-              onClick={() => setViewMode('analytics')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'analytics' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Analytics
-            </button>
-            <button
-              onClick={() => setViewMode('practice')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'practice' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Practice Management
-            </button>
-            <button
-              onClick={handleLogout}
-              className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
-            >
-              Logout
-            </button>
+          {/* Right: Toolbars */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex bg-white/10 rounded-md overflow-hidden border border-white/20 backdrop-blur-sm h-9">
+              <button
+                onClick={() => setSessionType('practice')}
+                className={`px-4 text-sm font-medium transition h-full flex items-center ${sessionType === 'practice' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Practice</button>
+              <button
+                onClick={() => setSessionType('lift')}
+                className={`px-4 text-sm font-medium transition h-full flex items-center ${sessionType === 'lift' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Lift</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { key: 'overview', label: 'Overview' },
+                { key: 'attendance', label: 'Mark' },
+                { key: 'captains', label: 'Captains' },
+                { key: 'analytics', label: 'Analytics' },
+                { key: 'practice', label: 'Practice Mgmt' }
+              ].map(btn => (
+                <button
+                  key={btn.key}
+                  onClick={() => setViewMode(btn.key as any)}
+                  className={`h-9 px-4 rounded-md text-sm font-medium transition-colors flex items-center ${
+                    viewMode === btn.key ? 'bg-blue-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
+                >
+                  {btn.label}
+                </button>
+              ))}
+              <button
+                onClick={handleLogout}
+                className="h-9 px-4 rounded-md text-sm font-medium flex items-center bg-red-500 hover:bg-red-600 text-white transition-colors"
+              >Logout</button>
+            </div>
           </div>
         </div>
 
