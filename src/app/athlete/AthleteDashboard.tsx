@@ -220,85 +220,212 @@ export default function AthleteDashboard() {
           </button>
         </div>
 
-        {/* Placeholder weekly attendance layout */}
-        <div className="border rounded p-4 bg-white shadow">
-          <div className="flex items-center justify-between mb-3">
-            <button
-              onClick={goToPreviousWeek}
-              className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              ← Previous Week
-            </button>
-            
-            <h2 className="text-lg font-semibold text-gray-900">
-              {currentWeekOffset === 0 ? "This Week's" : 
-               currentWeekOffset === -1 ? "Last Week's" :
-               currentWeekOffset === 1 ? "Next Week's" :
-               currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
-               `${currentWeekOffset} Weeks Ahead`} Attendance ({formatWeekRange(weekDates)})
-            </h2>
-            
-            <div className="flex gap-2">
-              {currentWeekOffset !== 0 && (
-                <button
-                  onClick={goToCurrentWeek}
-                  className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-sm"
-                >
-                  Current
-                </button>
-              )}
+        {/* Modern Weekly Attendance Calendar */}
+        <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-white/20 overflow-hidden">
+          {/* Calendar Header */}
+          <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
+            <div className="flex items-center justify-between mb-2">
               <button
-                onClick={goToNextWeek}
-                className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                onClick={goToPreviousWeek}
+                className="flex items-center gap-2 px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm"
               >
-                Next Week →
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+                Previous
               </button>
+              
+              <div className="text-center">
+                <h2 className="text-xl font-bold text-white">
+                  {currentWeekOffset === 0 ? "This Week's" : 
+                   currentWeekOffset === -1 ? "Last Week's" :
+                   currentWeekOffset === 1 ? "Next Week's" :
+                   currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
+                   `${currentWeekOffset} Weeks Ahead`} Attendance
+                </h2>
+                <p className="text-blue-100 text-sm font-medium">
+                  {formatWeekRange(weekDates)}
+                </p>
+              </div>
+              
+              <div className="flex gap-2">
+                {currentWeekOffset !== 0 && (
+                  <button
+                    onClick={goToCurrentWeek}
+                    className="px-3 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 text-sm backdrop-blur-sm"
+                  >
+                    Today
+                  </button>
+                )}
+                <button
+                  onClick={goToNextWeek}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm"
+                >
+                  Next
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
-          <table className="w-full border">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="p-2 border text-gray-900 font-bold text-base">Day</th>
-                <th className="p-2 border text-gray-900 font-bold text-base">Status</th>
-              </tr>
-            </thead>
-            <tbody>
+
+          {/* Calendar Grid */}
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
               {dayNames.map((dayName, index) => {
                 const currentDate = weekDates[index];
                 const status = getAttendanceStatus(currentDate);
                 const hasScheduledPractice = hasPractice(currentDate);
+                const isToday = currentDate.toDateString() === new Date().toDateString();
                 
                 return (
-                  <tr key={dayName}>
-                    <td className="p-2 border text-gray-900 font-semibold">
-                      {dayName} ({formatDate(currentDate)})
-                    </td>
-                    <td className="p-2 border text-center text-gray-900">
+                  <div
+                    key={dayName}
+                    className={`relative p-4 rounded-xl border-2 transition-all duration-200 hover:scale-105 ${
+                      isToday 
+                        ? 'border-yellow-400 bg-gradient-to-br from-yellow-50 to-yellow-100 shadow-lg' 
+                        : 'border-gray-200 bg-gradient-to-br from-gray-50 to-white hover:border-blue-300 hover:shadow-md'
+                    }`}
+                  >
+                    {/* Day Header */}
+                    <div className="text-center mb-3">
+                      <div className={`text-sm font-semibold uppercase tracking-wide ${
+                        isToday ? 'text-yellow-700' : 'text-gray-600'
+                      }`}>
+                        {dayName}
+                      </div>
+                      <div className={`text-2xl font-bold ${
+                        isToday ? 'text-yellow-800' : 'text-gray-800'
+                      }`}>
+                        {currentDate.getDate()}
+                      </div>
+                      <div className={`text-xs ${
+                        isToday ? 'text-yellow-600' : 'text-gray-500'
+                      }`}>
+                        {currentDate.toLocaleDateString('en-US', { month: 'short' })}
+                      </div>
+                    </div>
+
+                    {/* Practice Status */}
+                    <div className="text-center">
                       {!hasScheduledPractice ? (
-                        <span className="text-gray-500 font-semibold italic">No Practice</span>
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
+                            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </div>
+                          <span className="text-xs font-medium text-gray-500">No Practice</span>
+                        </div>
                       ) : status ? (
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${
-                          status === 'on-time' ? 'bg-green-100 text-green-800' :
-                          status === 'late' ? 'bg-yellow-100 text-yellow-800' :
-                          status === 'late-justified' ? 'bg-yellow-100 text-yellow-800' :
-                          status === 'excused' ? 'bg-blue-100 text-blue-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {status === 'on-time' ? 'On Time' :
-                           status === 'late' ? 'Late' :
-                           status === 'late-justified' ? 'Late (Justified)' :
-                           status === 'excused' ? 'Excused' :
-                           'Missing'}
-                        </span>
+                        <div className="flex flex-col items-center gap-2">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                            status === 'on-time' ? 'bg-green-100 text-green-600' :
+                            status === 'late' ? 'bg-yellow-100 text-yellow-600' :
+                            status === 'late-justified' ? 'bg-yellow-100 text-yellow-600' :
+                            status === 'excused' ? 'bg-blue-100 text-blue-600' :
+                            'bg-red-100 text-red-600'
+                          }`}>
+                            {status === 'on-time' ? (
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            ) : status === 'late' || status === 'late-justified' ? (
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            ) : status === 'excused' ? (
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            ) : (
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            )}
+                          </div>
+                          <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                            status === 'on-time' ? 'bg-green-100 text-green-700' :
+                            status === 'late' ? 'bg-yellow-100 text-yellow-700' :
+                            status === 'late-justified' ? 'bg-yellow-100 text-yellow-700' :
+                            status === 'excused' ? 'bg-blue-100 text-blue-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {status === 'on-time' ? 'On Time' :
+                             status === 'late' ? 'Late' :
+                             status === 'late-justified' ? 'Late (Justified)' :
+                             status === 'excused' ? 'Excused' :
+                             'Missing'}
+                          </span>
+                        </div>
                       ) : (
-                        <span className="text-gray-400 font-normal">Not Marked</span>
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
+                            <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          </div>
+                          <span className="text-xs font-medium text-gray-400">Not Marked</span>
+                        </div>
                       )}
-                    </td>
-                  </tr>
+                    </div>
+
+                    {/* Today indicator */}
+                    {isToday && (
+                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full border-2 border-white"></div>
+                    )}
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+            <div className="flex flex-wrap items-center justify-center gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-green-100 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <span className="text-gray-700">On Time</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-yellow-100 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <span className="text-gray-700">Late</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-blue-100 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <span className="text-gray-700">Excused</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-red-100 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </div>
+                <span className="text-gray-700">Missing</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-gray-200 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </div>
+                <span className="text-gray-700">No Practice</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
