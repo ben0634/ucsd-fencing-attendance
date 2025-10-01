@@ -844,11 +844,12 @@ export default function CoachDashboard() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {[
-                { key: 'overview', label: 'Overview' },
-                { key: 'attendance', label: 'Mark' },
-                { key: 'captains', label: 'Captains' },
+                { key: 'overview', label: 'Team Overview' },
+                { key: 'attendance', label: 'Mark Attendance' },
+                // Captains management only relevant for practice session type
+                ...(sessionType === 'practice' ? [{ key: 'captains', label: 'Manage Captains' }] : []),
                 { key: 'analytics', label: 'Analytics' },
-                { key: 'practice', label: 'Practice Mgmt' }
+                { key: 'practice', label: 'Practice Management' }
               ].map(btn => (
                 <button
                   key={btn.key}
