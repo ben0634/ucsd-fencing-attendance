@@ -202,7 +202,7 @@ export default function CoachDashboard() {
     }
   };
 
-  // Generate days for the selected month
+  // Generate days for the selected month (including weekends)
   const getMonthDays = () => {
     const year = selectedYear;
     const month = selectedMonth;
@@ -212,10 +212,8 @@ export default function CoachDashboard() {
     const days = [];
     for (let day = 1; day <= lastDay.getDate(); day++) {
       const date = new Date(year, month, day);
-      // Only include weekdays (Monday-Friday)
-      if (date.getDay() >= 1 && date.getDay() <= 5) {
-        days.push(date);
-      }
+      // Include all days (Monday-Sunday)
+      days.push(date);
     }
     return days;
   };
@@ -324,7 +322,7 @@ export default function CoachDashboard() {
     switch (status) {
       case 'on-time': return 'text-green-600 bg-green-50';
       case 'late': return 'text-yellow-600 bg-yellow-50';
-      case 'late-justified': return 'text-green-500 bg-green-50';
+      case 'late-justified': return 'text-green-600 bg-green-50';
       case 'excused': return 'text-blue-600 bg-blue-50';
       case 'missing': return 'text-red-600 bg-red-50';
       case 'no-practice': return 'text-gray-400 bg-gray-200'; // Lighter grey background
@@ -358,18 +356,17 @@ export default function CoachDashboard() {
         totalPossibleAttendance: 0,
         actualAttendance: 0,
         onTime: 0,
+        lateJustified: 0,
         late: 0,
         excused: 0,
         missing: 0,
         notMarked: 0
       };
 
-      // Get days that actually have practice scheduled for this squad
+      // Get days that actually have practice scheduled for this squad (including weekends)
       const practiceWeekdays = weekDates.filter((date, index) => {
         const dayName = dayNames[index];
-        // Skip weekends first
-        if (dayName === "Saturday" || dayName === "Sunday") return false;
-        // Check if practice is scheduled for this squad on this date
+        // Check if practice is scheduled for this squad on this date (including weekends)
         return hasPractice(squad.id, date);
       });
 
@@ -384,8 +381,10 @@ export default function CoachDashboard() {
               case 'on-time':
                 squadStats.onTime++;
                 break;
-              case 'late':
               case 'late-justified':
+                squadStats.lateJustified++;
+                break;
+              case 'late':
                 squadStats.late++;
                 break;
               case 'excused':
@@ -937,19 +936,18 @@ export default function CoachDashboard() {
                     
                     <div className="space-y-2 mb-4">
                       {squad.members.map((member: any) => {
-                        // Get this week's attendance summary for this member - only for days with practice scheduled
+                        // Get this week's attendance summary for this member - include all days (including weekends)
                         const practiceWeekdays = weekDates.filter((date, index) => {
                           const dayName = dayNames[index];
-                          // Skip weekends first
-                          if (dayName === "Saturday" || dayName === "Sunday") return false;
-                          // Check if practice is scheduled for this squad on this date
+                          // Check if practice is scheduled for this squad on this date (including weekends)
                           return hasPractice(squad.id, date);
                         });
                         
                         const weekAttendance = practiceWeekdays.map(date => getAttendanceStatus(member.id, date));
                         const attendanceCount = {
                           onTime: weekAttendance.filter(s => s === 'on-time').length,
-                          late: weekAttendance.filter(s => s === 'late' || s === 'late-justified').length,
+                          lateJustified: weekAttendance.filter(s => s === 'late-justified').length,
+                          late: weekAttendance.filter(s => s === 'late').length,
                           excused: weekAttendance.filter(s => s === 'excused').length,
                           missing: weekAttendance.filter(s => s === 'missing').length,
                           notMarked: weekAttendance.filter(s => s === null).length
@@ -986,7 +984,8 @@ export default function CoachDashboard() {
                                   ) : todayStatus ? (
                                     <span className={`px-2 py-1 rounded font-medium ${
                                       todayStatus === 'on-time' ? 'bg-green-100 text-green-700' :
-                                      todayStatus === 'late' || todayStatus === 'late-justified' ? 'bg-yellow-100 text-yellow-700' :
+                                      todayStatus === 'late' ? 'bg-yellow-100 text-yellow-700' :
+                                      todayStatus === 'late-justified' ? 'bg-green-100 text-green-700' :
                                       todayStatus === 'excused' ? 'bg-blue-100 text-blue-700' :
                                       'bg-red-100 text-red-700'
                                     }`}>
@@ -1012,26 +1011,30 @@ export default function CoachDashboard() {
                     {attendanceStats[squad.id] && (
                       <div className="border-t pt-3">
                         <p className="text-sm font-semibold text-gray-700 mb-2">This Week's Attendance:</p>
-                        <div className="grid grid-cols-3 gap-2 text-xs">
-                          <div className="bg-green-100 p-2 rounded">
-                            <div className="font-medium text-green-800">On Time</div>
-                            <div className="text-green-600">{attendanceStats[squad.id].onTime}</div>
+                        <div className="grid grid-cols-3 gap-3 max-w-xl">
+                          <div className="flex flex-col items-center justify-center border border-green-200 rounded-lg bg-green-50 px-3 py-2">
+                            <span className="text-[11px] font-medium text-green-700 tracking-wide">On Time</span>
+                            <span className="text-xl font-bold text-green-600 leading-snug">{attendanceStats[squad.id].onTime}</span>
                           </div>
-                          <div className="bg-yellow-100 p-2 rounded">
-                            <div className="font-medium text-yellow-800">Late</div>
-                            <div className="text-yellow-600">{attendanceStats[squad.id].late}</div>
+                          <div className="flex flex-col items-center justify-center border border-green-300 rounded-lg bg-green-100 px-3 py-2">
+                            <span className="text-[11px] font-medium text-green-700 tracking-wide">Late (J)</span>
+                            <span className="text-xl font-bold text-green-600 leading-snug">{attendanceStats[squad.id].lateJustified}</span>
                           </div>
-                          <div className="bg-blue-100 p-2 rounded">
-                            <div className="font-medium text-blue-800">Excused</div>
-                            <div className="text-blue-600">{attendanceStats[squad.id].excused}</div>
+                          <div className="flex flex-col items-center justify-center border border-yellow-300 rounded-lg bg-yellow-50 px-3 py-2">
+                            <span className="text-[11px] font-medium text-yellow-700 tracking-wide">Late</span>
+                            <span className="text-xl font-bold text-yellow-600 leading-snug">{attendanceStats[squad.id].late}</span>
                           </div>
-                          <div className="bg-red-100 p-2 rounded">
-                            <div className="font-medium text-red-800">Missing</div>
-                            <div className="text-red-600">{attendanceStats[squad.id].missing}</div>
+                          <div className="flex flex-col items-center justify-center border border-blue-300 rounded-lg bg-blue-50 px-3 py-2">
+                            <span className="text-[11px] font-medium text-blue-700 tracking-wide">Excused</span>
+                            <span className="text-xl font-bold text-blue-600 leading-snug">{attendanceStats[squad.id].excused}</span>
                           </div>
-                          <div className="bg-gray-100 p-2 rounded">
-                            <div className="font-medium text-gray-800">Not Marked</div>
-                            <div className="text-gray-600">{attendanceStats[squad.id].notMarked}</div>
+                          <div className="flex flex-col items-center justify-center border border-red-300 rounded-lg bg-red-50 px-3 py-2">
+                            <span className="text-[11px] font-medium text-red-700 tracking-wide">Missing</span>
+                            <span className="text-xl font-bold text-red-600 leading-snug">{attendanceStats[squad.id].missing}</span>
+                          </div>
+                          <div className="flex flex-col items-center justify-center border border-gray-300 rounded-lg bg-gray-100 px-3 py-2">
+                            <span className="text-[11px] font-medium text-gray-600 tracking-wide">Not Marked</span>
+                            <span className="text-xl font-bold text-gray-700 leading-snug">{attendanceStats[squad.id].notMarked}</span>
                           </div>
                         </div>
                       </div>
@@ -1118,6 +1121,9 @@ export default function CoachDashboard() {
                             <h4 className="font-bold text-lg text-gray-600">
                               {dayName} ({formatDate(currentDate)}) - No Practice
                             </h4>
+                            <div className="text-sm text-gray-500 mt-2">
+                              No practice scheduled for this day
+                            </div>
                           </div>
                         );
                       }
@@ -1149,7 +1155,8 @@ export default function CoachDashboard() {
                                       <div className="text-xs text-gray-600 mt-1">
                                         Current: <span className={`font-medium ${
                                           currentStatus === 'on-time' ? 'text-green-600' :
-                                          currentStatus === 'late' || currentStatus === 'late-justified' ? 'text-yellow-600' :
+                                          currentStatus === 'late' ? 'text-yellow-600' :
+                                          currentStatus === 'late-justified' ? 'text-green-600' :
                                           currentStatus === 'excused' ? 'text-blue-600' :
                                           'text-red-600'
                                         }`}>
@@ -1167,7 +1174,7 @@ export default function CoachDashboard() {
                                     {isMarking && (
                                       <div className="text-sm text-gray-500 mr-2">Updating...</div>
                                     )}
-                                    {['on-time', 'late', 'late-justified', 'excused', 'missing'].map((status) => (
+                                    {['on-time', 'late-justified', 'late', 'excused', 'missing'].map((status) => (
                                       <button
                                         key={status}
                                         onClick={() => markAttendance(member.id, currentDate, status)}
@@ -1178,15 +1185,15 @@ export default function CoachDashboard() {
                                             : ''
                                         }${
                                           status === 'on-time' ? 'bg-green-500 hover:bg-green-600 text-white' :
+                                          status === 'late-justified' ? 'bg-green-600 hover:bg-green-700 text-white' :
                                           status === 'late' ? 'bg-yellow-500 hover:bg-yellow-600 text-white' :
-                                          status === 'late-justified' ? 'bg-yellow-600 hover:bg-yellow-700 text-white' :
                                           status === 'excused' ? 'bg-blue-500 hover:bg-blue-600 text-white' :
                                           'bg-red-500 hover:bg-red-600 text-white'
                                         }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
                                       >
                                         {status === 'on-time' ? 'On Time' :
-                                         status === 'late' ? 'Late' :
                                          status === 'late-justified' ? 'Late (J)' :
+                                         status === 'late' ? 'Late' :
                                          status === 'excused' ? 'Excused' :
                                          'Missing'}
                                       </button>
@@ -1601,47 +1608,61 @@ export default function CoachDashboard() {
                 <div className="text-center">
                   <div className="text-2xl font-bold text-green-600">
                     {(() => {
-                      // Count on-time attendance for practice days only
+                      // Count on-time attendance for all days (including weekends)
                       let count = 0;
                       squads.forEach(squad => {
                         squad.members.forEach((member: any) => {
-                          getMonthDays().forEach(date => {
-                            const status = getAnalyticsAttendanceStatus(member.id, date);
-                            if (status === 'on-time') {
-                              count++;
-                            }
+                          weekDates.forEach(date => {
+                            const status = getAttendanceStatus(member.id, date);
+                            if (status === 'on-time') count++;
                           });
                         });
                       });
                       return count;
                     })()}
                   </div>
-                  <div className="text-gray-600">On Time</div>
+                  <div className="text-xs font-medium text-gray-600 mt-1">On Time</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-600">
+                    {(() => {
+                      // Count justified late attendance for all days
+                      let count = 0;
+                      squads.forEach(squad => {
+                        squad.members.forEach((member: any) => {
+                          weekDates.forEach(date => {
+                            const status = getAttendanceStatus(member.id, date);
+                            if (status === 'late-justified') count++;
+                          });
+                        });
+                      });
+                      return count;
+                    })()}
+                  </div>
+                  <div className="text-xs font-medium text-gray-600 mt-1">Late (Justified)</div>
                 </div>
                 <div className="text-center">
                   <div className="text-2xl font-bold text-yellow-600">
                     {(() => {
-                      // Count late attendance for practice days only
+                      // Count late attendance for all days (excluding justified)
                       let count = 0;
                       squads.forEach(squad => {
                         squad.members.forEach((member: any) => {
-                          getMonthDays().forEach(date => {
-                            const status = getAnalyticsAttendanceStatus(member.id, date);
-                            if (status === 'late' || status === 'late-justified') {
-                              count++;
-                            }
+                          weekDates.forEach(date => {
+                            const status = getAttendanceStatus(member.id, date);
+                            if (status === 'late') count++;
                           });
                         });
                       });
                       return count;
                     })()}
                   </div>
-                  <div className="text-gray-600">Late</div>
+                  <div className="text-xs font-medium text-gray-600 mt-1">Late</div>
                 </div>
                 <div className="text-center">
                   <div className="text-2xl font-bold text-blue-600">
                     {(() => {
-                      // Count excused attendance for practice days only
+                      // Count excused attendance for all days (including weekends)
                       let count = 0;
                       squads.forEach(squad => {
                         squad.members.forEach((member: any) => {
@@ -1661,7 +1682,7 @@ export default function CoachDashboard() {
                 <div className="text-center">
                   <div className="text-2xl font-bold text-red-600">
                     {(() => {
-                      // Count missing attendance for practice days only
+                      // Count missing attendance for all days (including weekends)
                       let count = 0;
                       squads.forEach(squad => {
                         squad.members.forEach((member: any) => {
@@ -1681,7 +1702,7 @@ export default function CoachDashboard() {
                 <div className="text-center">
                   <div className="text-2xl font-bold text-gray-600">
                     {(() => {
-                      // Count "Not Marked" - only for days that currently have practice scheduled but no attendance record
+                      // Count "Not Marked" - for all days that have practice scheduled but no attendance record
                       let notMarkedCount = 0;
                       
                       squads.forEach(squad => {
@@ -1794,9 +1815,10 @@ export default function CoachDashboard() {
                 {customSpecificDates.map((date, index) => (
                   <div key={index} className="flex gap-2 mb-2">
                     <input
+
                       type="date"
                       value={date}
-                      onChange={(e) => {
+                                           onChange={(e) => {
                         const newDates = [...customSpecificDates];
                         newDates[index] = e.target.value;
                         setCustomSpecificDates(newDates);

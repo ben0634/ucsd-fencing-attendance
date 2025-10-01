@@ -71,12 +71,12 @@ export default function CaptainDashboard() {
     setCurrentWeekOffset(currentWeekOffset + 1);
   };
 
-  // Fetch attendance data when week changes or user changes (but not when viewMode changes)
+  // Fetch attendance data when week changes, view mode changes, or after marking attendance
   useEffect(() => {
     if (user && user.user_metadata.role === 'captain') {
       fetchAttendanceData();
     }
-  }, [currentWeekOffset, user]);
+  }, [currentWeekOffset, user, viewMode]);
 
   const goToCurrentWeek = () => {
     setCurrentWeekOffset(0);
@@ -123,7 +123,6 @@ export default function CaptainDashboard() {
     const record = attendanceData.find(
       (a) => a.athlete_id === athleteId && a.date === dateString
     );
-    console.log('getAttendanceStatus called:', { athleteId, dateString, record, allData: attendanceData });
     return record?.status || null;
   };
 
@@ -208,12 +207,6 @@ export default function CaptainDashboard() {
 
   const markAttendance = async (athleteId: string, date: Date, status: string) => {
     const key = `${athleteId}-${getLocalDateString(date)}`;
-    console.log('=== MARKING ATTENDANCE ===');
-    console.log('Athlete ID:', athleteId);
-    console.log('Date:', date.toISOString());
-    console.log('Status:', status);
-    console.log('Current attendance data:', attendanceData);
-    
     setMarkingAttendance(prev => ({ ...prev, [key]: true }));
     setMessage('');
 
@@ -239,7 +232,6 @@ export default function CaptainDashboard() {
       });
 
       const result = await response.json();
-      console.log('API response:', result);
 
       if (!response.ok) {
         throw new Error(result.error || 'Failed to mark attendance');
@@ -248,12 +240,10 @@ export default function CaptainDashboard() {
       // Show success message
       setMessage(result.message || 'Attendance marked successfully');
       
-      // Update local state immediately
+      // Immediately update the attendance data in state to reflect the change
+      // This ensures the UI updates instantly before the API refetch completes
       const dateString = getLocalDateString(date);
-      console.log('Updating local state for:', { athleteId, dateString, status });
-      
       setAttendanceData(prevData => {
-        console.log('Previous data:', prevData);
         const existingIndex = prevData.findIndex(
           a => a.athlete_id === athleteId && a.date === dateString
         );
@@ -266,21 +256,19 @@ export default function CaptainDashboard() {
           updated_at: new Date().toISOString()
         };
         
-        let newData;
         if (existingIndex >= 0) {
           // Update existing record
-          newData = [...prevData];
+          const newData = [...prevData];
           newData[existingIndex] = { ...newData[existingIndex], ...newRecord };
-          console.log('Updated existing record at index', existingIndex, ':', newRecord);
+          return newData;
         } else {
           // Add new record
-          newData = [...prevData, newRecord];
-          console.log('Added new record:', newRecord);
+          return [...prevData, newRecord];
         }
-        
-        console.log('New attendance data:', newData);
-        return newData;
       });
+      
+      // Also refresh attendance data from server to ensure consistency
+      await fetchAttendanceData();
 
       // Clear message after 3 seconds
       setTimeout(() => setMessage(''), 3000);
@@ -399,6 +387,40 @@ export default function CaptainDashboard() {
               {message}
             </div>
           )}
+          {/* Week navigation for marking mode only (calendar view has its own header) */}
+          {viewMode === 'mark' && (
+            <div className="flex items-center justify-between mb-4">
+              <button
+                onClick={goToPreviousWeek}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg shadow-md hover:bg-blue-600 transition-transform transform hover:scale-105"
+              >
+                ← Previous Week
+              </button>
+              <h2 className="text-xl font-bold text-gray-900">
+                {viewMode === 'mark' ? 'Mark Attendance' : 'My Attendance'} - {currentWeekOffset === 0 ? "This Week" : 
+                 currentWeekOffset === -1 ? "Last Week" :
+                 currentWeekOffset === 1 ? "Next Week" :
+                 currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
+                 `${currentWeekOffset} Weeks Ahead`} ({formatWeekRange(weekDates)})
+              </h2>
+              <div className="flex gap-3">
+                {currentWeekOffset !== 0 && (
+                  <button
+                    onClick={goToCurrentWeek}
+                    className="px-3 py-1 bg-gray-500 text-white rounded-lg shadow-md hover:bg-gray-600 transition-transform transform hover:scale-105 text-sm"
+                  >
+                    Current
+                  </button>
+                )}
+                <button
+                  onClick={goToNextWeek}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-lg shadow-md hover:bg-blue-600 transition-transform transform hover:scale-105"
+                >
+                  Next Week →
+                </button>
+              </div>
+            </div>
+          )}
 
           {viewMode === 'mark' && (
             athletes.length === 0 ? (
@@ -447,8 +469,8 @@ export default function CaptainDashboard() {
                                 {currentStatus && (
                                   <div className="text-xs text-gray-600 mt-1">
                                     Current: <span className={`font-medium ${
-                                      currentStatus === 'on-time' ? 'text-green-600' :
-                                      currentStatus === 'late' || currentStatus === 'late-justified' ? 'text-yellow-600' :
+                                      currentStatus === 'on-time' || currentStatus === 'late-justified' ? 'text-green-600' :
+                                      currentStatus === 'late' ? 'text-yellow-600' :
                                       currentStatus === 'excused' ? 'text-blue-600' :
                                       'text-red-600'
                                     }`}>
@@ -466,7 +488,7 @@ export default function CaptainDashboard() {
                                 {isMarking && (
                                   <div className="text-sm text-gray-500 mr-2">Updating...</div>
                                 )}
-                                {['on-time', 'late', 'late-justified', 'excused', 'missing'].map((status) => (
+                                {['on-time', 'late-justified', 'late', 'excused', 'missing'].map((status) => (
                                   <button
                                     key={status}
                                     onClick={() => markAttendance(athlete.id, currentDate, status)}
@@ -478,7 +500,7 @@ export default function CaptainDashboard() {
                                     }${
                                       status === 'on-time' ? 'bg-green-500 hover:bg-green-600 text-white' :
                                       status === 'late' ? 'bg-yellow-500 hover:bg-yellow-600 text-white' :
-                                      status === 'late-justified' ? 'bg-yellow-600 hover:bg-yellow-700 text-white' :
+                                      status === 'late-justified' ? 'bg-green-600 hover:bg-green-700 text-white' :
                                       status === 'excused' ? 'bg-blue-500 hover:bg-blue-600 text-white' :
                                       'bg-red-500 hover:bg-red-600 text-white'
                                     }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
@@ -502,7 +524,7 @@ export default function CaptainDashboard() {
           )}
 
           {viewMode === 'view' && (
-            // My Attendance Mode - Show personal attendance calendar like athlete dashboard
+            // Modern personal attendance calendar (matches AthleteDashboard)
             <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-white/20 overflow-hidden">
               {/* Calendar Header */}
               <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
@@ -516,7 +538,6 @@ export default function CaptainDashboard() {
                     </svg>
                     Previous
                   </button>
-                  
                   <div className="text-center">
                     <h2 className="text-xl font-bold text-white">
                       My Attendance - {currentWeekOffset === 0 ? "This Week" : 
@@ -529,7 +550,6 @@ export default function CaptainDashboard() {
                       {formatWeekRange(weekDates)}
                     </p>
                   </div>
-                  
                   <div className="flex gap-2">
                     {currentWeekOffset !== 0 && (
                       <button
@@ -551,7 +571,6 @@ export default function CaptainDashboard() {
                   </div>
                 </div>
               </div>
-
               {/* Calendar Grid */}
               <div className="p-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
@@ -560,13 +579,13 @@ export default function CaptainDashboard() {
                     const status = getAttendanceStatus(user.id, currentDate);
                     const hasScheduledPractice = hasPractice(currentDate);
                     const isToday = currentDate.toDateString() === new Date().toDateString();
-                    
+
                     return (
                       <div
                         key={dayName}
                         className={`relative p-4 rounded-xl border-2 transition-all duration-200 hover:scale-105 ${
-                          isToday 
-                            ? 'border-yellow-400 bg-gradient-to-br from-yellow-50 to-yellow-100 shadow-lg' 
+                          isToday
+                            ? 'border-yellow-400 bg-gradient-to-br from-yellow-50 to-yellow-100 shadow-lg'
                             : 'border-gray-200 bg-gradient-to-br from-gray-50 to-white hover:border-blue-300 hover:shadow-md'
                         }`}
                       >
@@ -588,7 +607,6 @@ export default function CaptainDashboard() {
                             {currentDate.toLocaleDateString('en-US', { month: 'short' })}
                           </div>
                         </div>
-
                         {/* Practice Status */}
                         <div className="text-center">
                           {!hasScheduledPractice ? (
@@ -605,7 +623,7 @@ export default function CaptainDashboard() {
                               <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                                 status === 'on-time' ? 'bg-green-100 text-green-600' :
                                 status === 'late' ? 'bg-yellow-100 text-yellow-600' :
-                                status === 'late-justified' ? 'bg-yellow-100 text-yellow-600' :
+                                status === 'late-justified' ? 'bg-green-100 text-green-600' :
                                 status === 'excused' ? 'bg-blue-100 text-blue-600' :
                                 'bg-red-100 text-red-600'
                               }`}>
@@ -630,7 +648,7 @@ export default function CaptainDashboard() {
                               <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
                                 status === 'on-time' ? 'bg-green-100 text-green-700' :
                                 status === 'late' ? 'bg-yellow-100 text-yellow-700' :
-                                status === 'late-justified' ? 'bg-yellow-100 text-yellow-700' :
+                                status === 'late-justified' ? 'bg-green-100 text-green-700' :
                                 status === 'excused' ? 'bg-blue-100 text-blue-700' :
                                 'bg-red-100 text-red-700'
                               }`}>
@@ -652,8 +670,6 @@ export default function CaptainDashboard() {
                             </div>
                           )}
                         </div>
-
-                        {/* Today indicator */}
                         {isToday && (
                           <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full border-2 border-white"></div>
                         )}
@@ -662,7 +678,6 @@ export default function CaptainDashboard() {
                   })}
                 </div>
               </div>
-
               {/* Legend */}
               <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
                 <div className="flex flex-wrap items-center justify-center gap-6 text-sm">
@@ -673,6 +688,14 @@ export default function CaptainDashboard() {
                       </svg>
                     </div>
                     <span className="text-gray-700">On Time</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded-full bg-amber-100 flex items-center justify-center">
+                      <svg className="w-3 h-3 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <span className="text-gray-700">Late (Justified)</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-4 h-4 rounded-full bg-yellow-100 flex items-center justify-center">
@@ -707,6 +730,58 @@ export default function CaptainDashboard() {
                     <span className="text-gray-700">No Practice</span>
                   </div>
                 </div>
+              </div>
+              {/* Stats Display */}
+              <div className="mt-8 mb-4">
+                {(() => {
+                  const stats = { onTime: 0, late: 0, lateJustified: 0, excused: 0, missing: 0, notMarked: 0, total: 0 };
+                  weekDates.forEach(date => {
+                    const status = getAttendanceStatus(user.id, date);
+                    if (!hasPractice(date)) return;
+                    stats.total++;
+                    if (!status) stats.notMarked++;
+                    else if (status === 'on-time') stats.onTime++;
+                    else if (status === 'late') stats.late++;
+                    else if (status === 'late-justified') stats.lateJustified++;
+                    else if (status === 'excused') stats.excused++;
+                    else stats.missing++;
+                  });
+                  const percent = (count: number) => stats.total ? ((count / stats.total) * 100).toFixed(0) : '0';
+                  return (
+                    <div className="flex flex-wrap justify-center gap-6 bg-white rounded-xl shadow border border-gray-200 p-4">
+                      <div className="flex flex-col items-center">
+                        <span className="text-green-700 font-bold text-lg">{stats.onTime}</span>
+                        <span className="text-xs text-gray-600">On Time</span>
+                        <span className="text-xs text-green-700">{percent(stats.onTime)}%</span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-green-700 font-bold text-lg">{stats.lateJustified}</span>
+                        <span className="text-xs text-gray-600">Late (Justified)</span>
+                        <span className="text-xs text-green-700">{percent(stats.lateJustified)}%</span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-yellow-700 font-bold text-lg">{stats.late}</span>
+                        <span className="text-xs text-gray-600">Late</span>
+                        <span className="text-xs text-yellow-700">{percent(stats.late)}%</span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-blue-700 font-bold text-lg">{stats.excused}</span>
+                        <span className="text-xs text-gray-600">Excused</span>
+                        <span className="text-xs text-blue-700">{percent(stats.excused)}%</span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-red-700 font-bold text-lg">{stats.missing}</span>
+                        <span className="text-xs text-gray-600">Missing</span>
+                        <span className="text-xs text-red-700">{percent(stats.missing)}%</span>
+                      </div>
+                      <div className="flex flex-col items-center">
+                        <span className="text-gray-700 font-bold text-lg">{stats.notMarked}</span>
+                        <span className="text-xs text-gray-600">Not Marked</span>
+                        <span className="text-xs text-gray-700">{percent(stats.notMarked)}%</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}

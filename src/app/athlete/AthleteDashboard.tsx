@@ -323,7 +323,7 @@ export default function AthleteDashboard() {
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                             status === 'on-time' ? 'bg-green-100 text-green-600' :
                             status === 'late' ? 'bg-yellow-100 text-yellow-600' :
-                            status === 'late-justified' ? 'bg-yellow-100 text-yellow-600' :
+                            status === 'late-justified' ? 'bg-green-100 text-green-600' :
                             status === 'excused' ? 'bg-blue-100 text-blue-600' :
                             'bg-red-100 text-red-600'
                           }`}>
@@ -348,7 +348,7 @@ export default function AthleteDashboard() {
                           <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
                             status === 'on-time' ? 'bg-green-100 text-green-700' :
                             status === 'late' ? 'bg-yellow-100 text-yellow-700' :
-                            status === 'late-justified' ? 'bg-yellow-100 text-yellow-700' :
+                            status === 'late-justified' ? 'bg-green-100 text-green-700' :
                             status === 'excused' ? 'bg-blue-100 text-blue-700' :
                             'bg-red-100 text-red-700'
                           }`}>
@@ -401,6 +401,14 @@ export default function AthleteDashboard() {
                 <span className="text-gray-700">Late</span>
               </div>
               <div className="flex items-center gap-2">
+                <div className="w-4 h-4 rounded-full bg-amber-100 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <span className="text-gray-700">Late (Justified)</span>
+              </div>
+              <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded-full bg-blue-100 flex items-center justify-center">
                   <svg className="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -425,6 +433,59 @@ export default function AthleteDashboard() {
                 <span className="text-gray-700">No Practice</span>
               </div>
             </div>
+          </div>
+
+          {/* Stats Display */}
+          <div className="mt-8 mb-4">
+            {(() => {
+              const stats = { onTime: 0, late: 0, lateJustified: 0, excused: 0, missing: 0, notMarked: 0, total: 0 };
+              weekDates.forEach(date => {
+                const status = getAttendanceStatus(date);
+                if (!hasPractice(date)) return;
+                stats.total++;
+                if (!status) stats.notMarked++;
+                else if (status === 'on-time') stats.onTime++;
+                else if (status === 'late') stats.late++;
+                else if (status === 'late-justified') stats.lateJustified++;
+                else if (status === 'excused') stats.excused++;
+                else stats.missing++;
+              });
+              const percent = (count: number) => stats.total ? ((count / stats.total) * 100).toFixed(0) : '0';
+              return (
+                <div className="flex flex-wrap justify-center gap-6 bg-white rounded-xl shadow border border-gray-200 p-4">
+                  <div className="flex flex-col items-center">
+                    <span className="text-green-700 font-bold text-lg">{stats.onTime}</span>
+                    <span className="text-xs text-gray-600">On Time</span>
+                    <span className="text-xs text-green-700">{percent(stats.onTime)}%</span>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-green-700 font-bold text-lg">{stats.lateJustified}</span>
+                    <span className="text-xs text-gray-600">Late (Justified)</span>
+                    <span className="text-xs text-green-700">{percent(stats.lateJustified)}%</span>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-yellow-700 font-bold text-lg">{stats.late}</span>
+                    <span className="text-xs text-gray-600">Late</span>
+                    <span className="text-xs text-yellow-700">{percent(stats.late)}%</span>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-blue-700 font-bold text-lg">{stats.excused}</span>
+                    <span className="text-xs text-gray-600">Excused</span>
+                    <span className="text-xs text-blue-700">{percent(stats.excused)}%</span>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-red-700 font-bold text-lg">{stats.missing}</span>
+                    <span className="text-xs text-gray-600">Missing</span>
+                    <span className="text-xs text-red-700">{percent(stats.missing)}%</span>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-gray-700 font-bold text-lg">{stats.notMarked}</span>
+                    <span className="text-xs text-gray-600">Not Marked</span>
+                    <span className="text-xs text-gray-700">{percent(stats.notMarked)}%</span>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
