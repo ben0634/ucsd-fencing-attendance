@@ -123,6 +123,20 @@ export async function POST(request: NextRequest) {
 
     if (attendanceError) {
       console.error('Error marking attendance:', attendanceError);
+      const msg = attendanceError.message || '';
+      // Provide targeted guidance for common migration issues
+      if (/no unique or exclusion constraint/i.test(msg)) {
+        return NextResponse.json({
+          error: msg,
+          hint: 'Run scripts/add_attendance_session_type_unique_index.sql to add UNIQUE (athlete_id, date, session_type).'
+        }, { status: 500 });
+      }
+      if (/column .*session_type.* does not exist/i.test(msg)) {
+        return NextResponse.json({
+          error: msg,
+          hint: 'Add session_type column by running scripts/add_attendance_session_type_unique_index.sql.'
+        }, { status: 500 });
+      }
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 

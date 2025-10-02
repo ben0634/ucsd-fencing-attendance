@@ -85,6 +85,13 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error('Database error:', error);
+      // Provide targeted guidance if unique constraint for onConflict is missing
+      if (error.message && /no unique or exclusion constraint/i.test(error.message)) {
+        return NextResponse.json({ 
+          error: error.message,
+          hint: 'Run the migration script scripts/add_lift_schedule_unique_index.sql to add a UNIQUE (squad_id, session_type) constraint.'
+        }, { status: 500 });
+      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
