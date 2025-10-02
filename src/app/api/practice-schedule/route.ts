@@ -7,19 +7,29 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 // Service client for admin operations
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-// Get practice schedules for all squads
-export async function GET() {
+const VALID_SESSION_TYPES = ['practice', 'lift'] as const;
+type SessionType = typeof VALID_SESSION_TYPES[number];
+function normalizeSessionType(raw: any): SessionType {
+  if (typeof raw !== 'string') return 'practice';
+  return (VALID_SESSION_TYPES as readonly string[]).includes(raw) ? raw as SessionType : 'practice';
+}
+
+// Get practice (or lift) schedules for all squads
+export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    const sessionType = normalizeSessionType(url.searchParams.get('sessionType'));
     const { data: schedules, error } = await supabaseAdmin
       .from('practice_schedules')
-      .select('*');
+      .select('*')
+      .eq('session_type', sessionType);
 
     if (error) {
       console.error('Error fetching practice schedules:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ schedules });
+    return NextResponse.json({ schedules, sessionType });
   } catch (error) {
     console.error('Unexpected error in GET:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -30,7 +40,8 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { squadId, practiceDays, customNoPracticeDays, customPracticeDays } = body;
+    const { squadId, practiceDays, customNoPracticeDays, customPracticeDays, sessionType: incomingSessionType } = body;
+    const sessionType = normalizeSessionType(incomingSessionType);
 
     if (!squadId) {
       return NextResponse.json({ error: 'Squad ID is required' }, { status: 400 });
@@ -65,20 +76,29 @@ export async function POST(request: Request) {
         practice_days: practiceDays || [],
         custom_no_practice_days: customNoPracticeDays || [],
         custom_practice_days: customPracticeDays || [],
+        session_type: sessionType,
         updated_at: new Date().toISOString()
       }, {
-        onConflict: 'squad_id'
+        onConflict: 'squad_id,session_type'
       })
       .select();
 
     if (error) {
       console.error('Database error:', error);
+      // Provide targeted guidance if unique constraint for onConflict is missing
+      if (error.message && /no unique or exclusion constraint/i.test(error.message)) {
+        return NextResponse.json({ 
+          error: error.message,
+          hint: 'Run the migration script scripts/add_lift_schedule_unique_index.sql to add a UNIQUE (squad_id, session_type) constraint.'
+        }, { status: 500 });
+      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ 
       message: 'Practice schedule updated successfully',
-      schedule: data?.[0]
+      schedule: data?.[0],
+      sessionType
     });
   } catch (error) {
     console.error('Unexpected error:', error);

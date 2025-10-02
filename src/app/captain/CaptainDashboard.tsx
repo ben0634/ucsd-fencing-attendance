@@ -13,10 +13,29 @@ export default function CaptainDashboard() {
   const [markingAttendance, setMarkingAttendance] = useState<{[key: string]: boolean}>({});
   const [message, setMessage] = useState<string>('');
   const [viewMode, setViewMode] = useState<'mark' | 'view'>('mark'); // 'mark' for marking others, 'view' for viewing own
+  // Active (currently displayed) schedule state for selected sessionType
   const [practiceSchedules, setPracticeSchedules] = useState<{[key: string]: string[]}>({});
   const [customNoPracticeDays, setCustomNoPracticeDays] = useState<{[key: string]: string[]}>({});
   const [customPracticeDays, setCustomPracticeDays] = useState<{[key: string]: string[]}>({});
+  // Cached copies per sessionType so toggling does not refetch every time and keeps separate state
+  const [practiceScheduleCache, setPracticeScheduleCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
+  const [customNoPracticeDaysCache, setCustomNoPracticeDaysCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
+  const [customPracticeDaysCache, setCustomPracticeDaysCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
+  // sessionType controls whether we are viewing/marking practice or lift attendance
+  const [sessionType, setSessionType] = useState<'practice' | 'lift'>('practice');
   const router = useRouter();
+
+  // Persist last used sessionType
+  useEffect(() => {
+    try { localStorage.setItem('captain_last_session_type', sessionType); } catch {}
+  }, [sessionType]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('captain_last_session_type');
+      if (saved === 'practice' || saved === 'lift') setSessionType(saved);
+    } catch {}
+  }, []);
 
   // Get current week's dates with offset (same as athlete dashboard)
   const getWeekDates = () => {
@@ -71,12 +90,13 @@ export default function CaptainDashboard() {
     setCurrentWeekOffset(currentWeekOffset + 1);
   };
 
-  // Fetch attendance data when week changes, view mode changes, or after marking attendance
+  // Fetch attendance data when week, view mode, or session type changes
   useEffect(() => {
     if (user && user.user_metadata.role === 'captain') {
       fetchAttendanceData();
     }
-  }, [currentWeekOffset, user, viewMode]);
+  }, [currentWeekOffset, user, viewMode, sessionType]);
+
 
   const goToCurrentWeek = () => {
     setCurrentWeekOffset(0);
@@ -93,7 +113,7 @@ export default function CaptainDashboard() {
       const startDate = getLocalDateString(weekDates[0]);
       const endDate = getLocalDateString(weekDates[weekDates.length - 1]);
 
-      let url = `/api/attendance?startDate=${startDate}&endDate=${endDate}`;
+  let url = `/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`;
       
       // If viewing own attendance, filter by current user
       if (viewMode === 'view' && user) {
@@ -184,8 +204,7 @@ export default function CaptainDashboard() {
           
           // Fetch attendance data after getting athletes
           await fetchAttendanceData();
-          
-          // Fetch practice schedules
+          // Fetch schedules for initial sessionType only (practice default)
           await fetchPracticeSchedules();
         }
         
@@ -227,14 +246,16 @@ export default function CaptainDashboard() {
         body: JSON.stringify({
           athleteId,
           date: date.toISOString(),
-          status
+          status,
+          sessionType
         })
       });
 
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.error || 'Failed to mark attendance');
+        console.error('Attendance POST failed:', result);
+        throw new Error(result.hint || result.error || 'Failed to mark attendance');
       }
 
       // Show success message
@@ -290,7 +311,7 @@ export default function CaptainDashboard() {
       
       if (!accessToken) return;
 
-      const response = await fetch('/api/practice-schedule', {
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -312,11 +333,30 @@ export default function CaptainDashboard() {
         setPracticeSchedules(scheduleMap);
         setCustomNoPracticeDays(customNoPracticeMap);
         setCustomPracticeDays(customPracticeMap);
+        // Update caches for this sessionType
+        setPracticeScheduleCache(prev => ({ ...prev, [sessionType]: scheduleMap }));
+        setCustomNoPracticeDaysCache(prev => ({ ...prev, [sessionType]: customNoPracticeMap }));
+        setCustomPracticeDaysCache(prev => ({ ...prev, [sessionType]: customPracticeMap }));
       }
     } catch (error) {
       console.error('Error fetching practice schedules:', error);
     }
   };
+
+  // When sessionType changes: load from cache if available; otherwise fetch
+  useEffect(() => {
+    if (!user) return;
+    // Attendance always distinct per sessionType
+    fetchAttendanceData();
+    const cachedSchedules = practiceScheduleCache[sessionType];
+    if (Object.keys(cachedSchedules).length > 0) {
+      setPracticeSchedules(cachedSchedules);
+      setCustomNoPracticeDays(customNoPracticeDaysCache[sessionType]);
+      setCustomPracticeDays(customPracticeDaysCache[sessionType]);
+    } else {
+      fetchPracticeSchedules();
+    }
+  }, [sessionType]);
 
   // Check if there's practice for a squad on a given date
   const hasPractice = (date: Date) => {
@@ -362,6 +402,16 @@ export default function CaptainDashboard() {
             </p>
           </div>
           <div className="flex gap-4 items-center">
+            <div className="flex bg-white/10 rounded-lg overflow-hidden border border-white/20 backdrop-blur-sm">
+              <button
+                onClick={() => setSessionType('practice')}
+                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'practice' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Practice</button>
+              <button
+                onClick={() => setSessionType('lift')}
+                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'lift' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Lift</button>
+            </div>
             <button
               onClick={() => setViewMode(viewMode === 'mark' ? 'view' : 'mark')}
               className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
@@ -396,13 +446,13 @@ export default function CaptainDashboard() {
               >
                 ← Previous Week
               </button>
-              <h2 className="text-xl font-bold text-gray-900">
-                {viewMode === 'mark' ? 'Mark Attendance' : 'My Attendance'} - {currentWeekOffset === 0 ? "This Week" : 
-                 currentWeekOffset === -1 ? "Last Week" :
-                 currentWeekOffset === 1 ? "Next Week" :
-                 currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
-                 `${currentWeekOffset} Weeks Ahead`} ({formatWeekRange(weekDates)})
-              </h2>
+          <h2 className="text-xl font-bold text-gray-900">
+          {currentWeekOffset === 0 ? "This Week's" : 
+            currentWeekOffset === -1 ? "Last Week's" :
+            currentWeekOffset === 1 ? "Next Week's" :
+            currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
+            `${currentWeekOffset} Weeks Ahead`} {sessionType === 'practice' ? 'Practice' : 'Lift'} {viewMode === 'mark' ? 'Attendance Marking' : 'Attendance'} ({formatWeekRange(weekDates)})
+          </h2>
               <div className="flex gap-3">
                 {currentWeekOffset !== 0 && (
                   <button
@@ -438,7 +488,7 @@ export default function CaptainDashboard() {
                     return (
                       <div key={dayName} className="border rounded-lg p-4 bg-gray-50">
                         <h3 className="font-bold text-lg text-gray-600">
-                          {dayName} ({formatDate(currentDate)}) - No Practice
+                          {dayName} ({formatDate(currentDate)}) - No {sessionType === 'practice' ? 'Practice' : 'Lift'}
                         </h3>
                         <p className="text-sm text-gray-500 mt-1">
                           Practice not scheduled for this day
@@ -539,13 +589,14 @@ export default function CaptainDashboard() {
                     Previous
                   </button>
                   <div className="text-center">
-                    <h2 className="text-xl font-bold text-white">
-                      My Attendance - {currentWeekOffset === 0 ? "This Week" : 
-                       currentWeekOffset === -1 ? "Last Week" :
-                       currentWeekOffset === 1 ? "Next Week" :
-                       currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
-                       `${currentWeekOffset} Weeks Ahead`}
-                    </h2>
+        <h2 className="text-xl font-bold text-white">
+         {currentWeekOffset === 0 ? "This Week's" : 
+           currentWeekOffset === -1 ? "Last Week's" :
+           currentWeekOffset === 1 ? "Next Week's" :
+           currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
+           `${currentWeekOffset} Weeks Ahead`} {sessionType === 'practice' ? 'Practice' : 'Lift'} Attendance
+        </h2>
+              {/* Removed mode badge per request */}
                     <p className="text-blue-100 text-sm font-medium">
                       {formatWeekRange(weekDates)}
                     </p>
@@ -616,7 +667,7 @@ export default function CaptainDashboard() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                                 </svg>
                               </div>
-                              <span className="text-xs font-medium text-gray-500">No Practice</span>
+                              <span className="text-xs font-medium text-gray-500">No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
                             </div>
                           ) : status ? (
                             <div className="flex flex-col items-center gap-2">
@@ -727,7 +778,7 @@ export default function CaptainDashboard() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       </svg>
                     </div>
-                    <span className="text-gray-700">No Practice</span>
+                    <span className="text-gray-700">No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
                   </div>
                 </div>
               </div>

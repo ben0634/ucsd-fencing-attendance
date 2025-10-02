@@ -10,10 +10,29 @@ export default function AthleteDashboard() {
   const [loading, setLoading] = useState(true);
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
   const [attendanceData, setAttendanceData] = useState<any[]>([]);
+  // Active schedule state for current sessionType
   const [practiceSchedules, setPracticeSchedules] = useState<{[key: string]: string[]}>({});
   const [customNoPracticeDays, setCustomNoPracticeDays] = useState<{[key: string]: string[]}>({});
   const [customPracticeDays, setCustomPracticeDays] = useState<{[key: string]: string[]}>({});
+  // Cached per-sessionType schedules to avoid losing state when toggling
+  const [practiceScheduleCache, setPracticeScheduleCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
+  const [customNoPracticeDaysCache, setCustomNoPracticeDaysCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
+  const [customPracticeDaysCache, setCustomPracticeDaysCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
+  // sessionType allows switching between practice and lift attendance views
+  const [sessionType, setSessionType] = useState<'practice' | 'lift'>('practice');
   const router = useRouter();
+
+  // Persist last used session type
+  useEffect(() => {
+    try { localStorage.setItem('athlete_last_session_type', sessionType); } catch {}
+  }, [sessionType]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('athlete_last_session_type');
+      if (saved === 'practice' || saved === 'lift') setSessionType(saved);
+    } catch {}
+  }, []);
 
   // Get current week's dates with offset
   const getWeekDates = () => {
@@ -83,7 +102,7 @@ export default function AthleteDashboard() {
       const startDate = getLocalDateString(weekDates[0]);
       const endDate = getLocalDateString(weekDates[weekDates.length - 1]);
 
-      const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}`, {
+      const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -105,8 +124,8 @@ export default function AthleteDashboard() {
       const accessToken = sessionData.session?.access_token;
       
       if (!accessToken) return;
-
-      const response = await fetch('/api/practice-schedule', {
+      // For now we reuse the same endpoint; in lift mode backend will later filter by sessionType
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -128,6 +147,10 @@ export default function AthleteDashboard() {
         setPracticeSchedules(scheduleMap);
         setCustomNoPracticeDays(customNoPracticeMap);
         setCustomPracticeDays(customPracticeMap);
+        // update caches
+        setPracticeScheduleCache(prev => ({ ...prev, [sessionType]: scheduleMap }));
+        setCustomNoPracticeDaysCache(prev => ({ ...prev, [sessionType]: customNoPracticeMap }));
+        setCustomPracticeDaysCache(prev => ({ ...prev, [sessionType]: customPracticeMap }));
       }
     } catch (error) {
       console.error('Error fetching practice schedules:', error);
@@ -142,6 +165,13 @@ export default function AthleteDashboard() {
 
   const hasPractice = (date: Date) => {
     if (!user) return true; // Default to showing practice if we don't know
+
+    // In lift mode (temporary logic): until separate schedules exist, we treat lift as occurring
+    // on the same scheduled practice days. Later we will maintain distinct schedules.
+    if (sessionType === 'lift') {
+      // Placeholder: treat lift as scheduled on practice days; could be refined
+      // Optionally return true always to allow marking every day: return true;
+    }
     
     const dateString = getLocalDateString(date);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
@@ -175,6 +205,20 @@ export default function AthleteDashboard() {
       fetchPracticeSchedules();
     }
   }, [currentWeekOffset, user]);
+
+  // Refetch or restore schedules & attendance when sessionType toggles
+  useEffect(() => {
+    if (!user) return;
+    fetchAttendanceData();
+    const cached = practiceScheduleCache[sessionType];
+    if (Object.keys(cached).length > 0) {
+      setPracticeSchedules(cached);
+      setCustomNoPracticeDays(customNoPracticeDaysCache[sessionType]);
+      setCustomPracticeDays(customPracticeDaysCache[sessionType]);
+    } else {
+      fetchPracticeSchedules();
+    }
+  }, [sessionType]);
 
   useEffect(() => {
     async function checkUser() {
@@ -212,12 +256,24 @@ export default function AthleteDashboard() {
               Squad: {user?.user_metadata?.gender === 'male' ? "Men's" : user?.user_metadata?.gender === 'female' ? "Women's" : user?.user_metadata?.gender} {user?.user_metadata?.weapon?.charAt(0).toUpperCase() + user?.user_metadata?.weapon?.slice(1)}
             </p>
           </div>
-          <button
-            onClick={handleLogout}
-            className="px-3 py-1 bg-red-500 text-white rounded"
-          >
-            Logout
-          </button>
+            <div className="flex items-center gap-3">
+            <div className="flex bg-white/10 rounded-lg overflow-hidden border border-white/20 backdrop-blur-sm">
+              <button
+                onClick={() => setSessionType('practice')}
+                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'practice' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Practice</button>
+              <button
+                onClick={() => setSessionType('lift')}
+                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'lift' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Lift</button>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1 bg-red-500 text-white rounded"
+            >
+              Logout
+            </button>
+          </div>
         </div>
 
         {/* Modern Weekly Attendance Calendar */}
@@ -241,7 +297,7 @@ export default function AthleteDashboard() {
                    currentWeekOffset === -1 ? "Last Week's" :
                    currentWeekOffset === 1 ? "Next Week's" :
                    currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
-                   `${currentWeekOffset} Weeks Ahead`} Attendance
+                   `${currentWeekOffset} Weeks Ahead`} {sessionType === 'practice' ? 'Practice' : 'Lift'} Attendance
                 </h2>
                 <p className="text-blue-100 text-sm font-medium">
                   {formatWeekRange(weekDates)}
@@ -316,7 +372,7 @@ export default function AthleteDashboard() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
                           </div>
-                          <span className="text-xs font-medium text-gray-500">No Practice</span>
+                          <span className="text-xs font-medium text-gray-500">No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
                         </div>
                       ) : status ? (
                         <div className="flex flex-col items-center gap-2">
@@ -384,6 +440,7 @@ export default function AthleteDashboard() {
           {/* Legend */}
           <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
             <div className="flex flex-wrap items-center justify-center gap-6 text-sm">
+              {/* Removed mode badge per request */}
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded-full bg-green-100 flex items-center justify-center">
                   <svg className="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -430,7 +487,7 @@ export default function AthleteDashboard() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </div>
-                <span className="text-gray-700">No Practice</span>
+                <span className="text-gray-700">No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
               </div>
             </div>
           </div>

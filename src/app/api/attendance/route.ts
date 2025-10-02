@@ -5,6 +5,14 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+const VALID_SESSION_TYPES = ['practice', 'lift'] as const;
+type SessionType = typeof VALID_SESSION_TYPES[number];
+
+function normalizeSessionType(raw: any): SessionType {
+  if (typeof raw !== 'string') return 'practice';
+  return (VALID_SESSION_TYPES as readonly string[]).includes(raw) ? (raw as SessionType) : 'practice';
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Get the authorization header
@@ -27,8 +35,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
-    // Get the request body
-    const { athleteId, date, status } = await request.json();
+  // Get the request body
+  const { athleteId, date, status, sessionType: incomingSessionType } = await request.json();
+  const sessionType = normalizeSessionType(incomingSessionType);
 
     // Validate required fields
     if (!athleteId || !date || !status) {
@@ -96,7 +105,7 @@ export async function POST(request: NextRequest) {
     // Format date as YYYY-MM-DD
     const formattedDate = attendanceDate.toISOString().split('T')[0];
 
-    // Insert or update attendance record
+    // Insert or update attendance record (now scoped by session_type)
     const { data: attendanceData, error: attendanceError } = await supabase
       .from('attendance')
       .upsert({
@@ -104,15 +113,30 @@ export async function POST(request: NextRequest) {
         date: formattedDate,
         status: status,
         marked_by: user.id,
+        session_type: sessionType,
         updated_at: new Date().toISOString()
       }, {
-        onConflict: 'athlete_id,date'
+        onConflict: 'athlete_id,date,session_type'
       })
       .select()
       .single();
 
     if (attendanceError) {
       console.error('Error marking attendance:', attendanceError);
+      const msg = attendanceError.message || '';
+      // Provide targeted guidance for common migration issues
+      if (/no unique or exclusion constraint/i.test(msg)) {
+        return NextResponse.json({
+          error: msg,
+          hint: 'Run scripts/add_attendance_session_type_unique_index.sql to add UNIQUE (athlete_id, date, session_type).'
+        }, { status: 500 });
+      }
+      if (/column .*session_type.* does not exist/i.test(msg)) {
+        return NextResponse.json({
+          error: msg,
+          hint: 'Add session_type column by running scripts/add_attendance_session_type_unique_index.sql.'
+        }, { status: 500 });
+      }
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
@@ -131,7 +155,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ 
       success: true, 
       attendance: attendanceData,
-      message: `Attendance marked as ${status} for ${attendeeName}`
+      message: `Attendance (${sessionType}) marked as ${status} for ${attendeeName}`
     });
     
   } catch (error) {
@@ -160,11 +184,12 @@ export async function GET(request: NextRequest) {
 
     // Get query parameters
     const url = new URL(request.url);
-    const startDate = url.searchParams.get('startDate');
-    const endDate = url.searchParams.get('endDate');
-    const athleteId = url.searchParams.get('athleteId');
+  const startDate = url.searchParams.get('startDate');
+  const endDate = url.searchParams.get('endDate');
+  const athleteId = url.searchParams.get('athleteId');
+  const sessionType = normalizeSessionType(url.searchParams.get('sessionType'));
 
-    let query = supabase.from('attendance').select('*');
+  let query = supabase.from('attendance').select('*').eq('session_type', sessionType);
 
     // Filter based on user role
     if (user.user_metadata?.role === 'captain') {
@@ -248,7 +273,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ attendance: attendanceWithUsers });
+  return NextResponse.json({ attendance: attendanceWithUsers, sessionType });
     
   } catch (error) {
     console.error('API error:', error);

@@ -21,13 +21,33 @@ export default function CoachDashboard() {
   const [practiceSchedules, setPracticeSchedules] = useState<{[key: string]: string[]}>({});
   const [customNoPracticeDays, setCustomNoPracticeDays] = useState<{[key: string]: string[]}>({});
   const [customPracticeDays, setCustomPracticeDays] = useState<{[key: string]: string[]}>({});
+  // Cache per sessionType
+  const [practiceScheduleCache, setPracticeScheduleCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
+  const [customNoPracticeDaysCache, setCustomNoPracticeDaysCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
+  const [customPracticeDaysCache, setCustomPracticeDaysCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
   const [updatingSchedule, setUpdatingSchedule] = useState<{[key: string]: boolean}>({});
   const [showCustomDaysModal, setShowCustomDaysModal] = useState(false);
   const [customDayType, setCustomDayType] = useState<'no-practice' | 'practice'>('no-practice');
   const [selectedCustomSquad, setSelectedCustomSquad] = useState<string>('all');
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
   const [customSpecificDates, setCustomSpecificDates] = useState<string[]>(['']);
+  // sessionType toggle for Practice vs Lift modes
+  const [sessionType, setSessionType] = useState<'practice' | 'lift'>('practice');
   const router = useRouter();
+
+  // When sessionType toggles, attempt to restore cached schedules; otherwise fetch
+  useEffect(() => {
+    // Skip initial before user load
+    if (!user) return;
+    const cached = practiceScheduleCache[sessionType];
+    if (Object.keys(cached).length > 0) {
+      setPracticeSchedules(cached);
+      setCustomNoPracticeDays(customNoPracticeDaysCache[sessionType]);
+      setCustomPracticeDays(customPracticeDaysCache[sessionType]);
+    } else {
+      fetchPracticeSchedules();
+    }
+  }, [sessionType]);
 
   // Get current week's dates with offset
   const getWeekDates = () => {
@@ -155,7 +175,7 @@ export default function CoachDashboard() {
       const startDate = getLocalDateString(weekDates[0]);
       const endDate = getLocalDateString(weekDates[weekDates.length - 1]);
 
-      const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}`, {
+      const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -186,7 +206,7 @@ export default function CoachDashboard() {
       const startDate = getLocalDateString(firstDay);
       const endDate = getLocalDateString(lastDay);
 
-      const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}`, {
+      const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -201,6 +221,20 @@ export default function CoachDashboard() {
       console.error('Error fetching analytics data:', error);
     }
   };
+
+  // Auto-refresh after login / user load (and when sessionType changes)
+  useEffect(() => {
+    if (user && user.user_metadata?.role === 'coach') {
+      // Fire and forget parallel fetches
+      Promise.all([
+        fetchAttendanceData(),
+        fetchPracticeSchedules(),
+        fetchSquads(),
+        fetchAnalyticsData()
+      ]).catch(e => console.error('Auto refresh error:', e));
+    }
+  // Include sessionType so switching practice/lift also triggers full sync
+  }, [user, sessionType]);
 
   // Generate days for the selected month (including weekends)
   const getMonthDays = () => {
@@ -436,7 +470,8 @@ export default function CoachDashboard() {
         body: JSON.stringify({
           athleteId,
           date: date.toISOString(),
-          status
+          status,
+          sessionType
         })
       });
 
@@ -536,8 +571,7 @@ export default function CoachDashboard() {
         console.error('No access token for fetching schedules');
         return;
       }
-
-      const response = await fetch('/api/practice-schedule', {
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -560,6 +594,10 @@ export default function CoachDashboard() {
         setPracticeSchedules(scheduleMap);
         setCustomNoPracticeDays(customNoPracticeMap);
         setCustomPracticeDays(customPracticeMap);
+        // cache per session type
+        setPracticeScheduleCache(prev => ({ ...prev, [sessionType]: scheduleMap }));
+        setCustomNoPracticeDaysCache(prev => ({ ...prev, [sessionType]: customNoPracticeMap }));
+        setCustomPracticeDaysCache(prev => ({ ...prev, [sessionType]: customPracticeMap }));
       } else {
         console.error('Failed to fetch schedules:', response.status, await response.text());
       }
@@ -588,16 +626,18 @@ export default function CoachDashboard() {
           squadId,
           practiceDays,
           customNoPracticeDays: customNoPracticeDays[squadId] || [],
-          customPracticeDays: customPracticeDays[squadId] || []
+          customPracticeDays: customPracticeDays[squadId] || [],
+          sessionType
         })
       });
 
       const result = await response.json();
 
       if (response.ok) {
-        setPracticeSchedules(prev => ({
+        setPracticeSchedules(prev => ({ ...prev, [squadId]: practiceDays }));
+        setPracticeScheduleCache(prev => ({
           ...prev,
-          [squadId]: practiceDays
+          [sessionType]: { ...prev[sessionType], [squadId]: practiceDays }
         }));
         setMessage('Practice schedule updated successfully');
         setTimeout(() => setMessage(''), 3000);
@@ -674,8 +714,16 @@ export default function CoachDashboard() {
         
         if (customDayType === 'no-practice') {
           setCustomNoPracticeDays(prev => ({ ...prev, [squadId]: newCustomDays }));
+          setCustomNoPracticeDaysCache(prev => ({
+            ...prev,
+            [sessionType]: { ...prev[sessionType], [squadId]: newCustomDays }
+          }));
         } else {
           setCustomPracticeDays(prev => ({ ...prev, [squadId]: newCustomDays }));
+          setCustomPracticeDaysCache(prev => ({
+            ...prev,
+            [sessionType]: { ...prev[sessionType], [squadId]: newCustomDays }
+          }));
         }
         
         // Update in database - pass the NEW custom days directly
@@ -683,7 +731,8 @@ export default function CoachDashboard() {
           squadId, 
           practiceSchedules[squadId] || [], 
           customDayType === 'no-practice' ? newCustomDays : (customNoPracticeDays[squadId] || []),
-          customDayType === 'practice' ? newCustomDays : (customPracticeDays[squadId] || [])
+          customDayType === 'practice' ? newCustomDays : (customPracticeDays[squadId] || []),
+          sessionType
         );
       }
       
@@ -704,7 +753,8 @@ export default function CoachDashboard() {
     squadId: string, 
     practiceDays: string[], 
     customNoPracticeDaysOverride?: string[], 
-    customPracticeDaysOverride?: string[]
+    customPracticeDaysOverride?: string[],
+    sessionTypeOverride?: 'practice' | 'lift'
   ) => {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -725,7 +775,8 @@ export default function CoachDashboard() {
           squadId,
           practiceDays,
           customNoPracticeDays: customNoPracticeDaysOverride ?? (customNoPracticeDays[squadId] || []),
-          customPracticeDays: customPracticeDaysOverride ?? (customPracticeDays[squadId] || [])
+          customPracticeDays: customPracticeDaysOverride ?? (customPracticeDays[squadId] || []),
+          sessionType: sessionTypeOverride || sessionType
         })
       });
 
@@ -746,20 +797,30 @@ export default function CoachDashboard() {
       if (dayType === 'no-practice') {
         const newDays = (customNoPracticeDays[squadId] || []).filter(date => date !== dateToRemove);
         setCustomNoPracticeDays(prev => ({ ...prev, [squadId]: newDays }));
+        setCustomNoPracticeDaysCache(prev => ({
+          ...prev,
+            [sessionType]: { ...prev[sessionType], [squadId]: newDays }
+        }));
         await updatePracticeScheduleWithCustomDays(
           squadId, 
           practiceSchedules[squadId] || [], 
           newDays, // Pass the new no-practice days
-          customPracticeDays[squadId] || [] // Keep existing practice days
+          customPracticeDays[squadId] || [], // Keep existing practice days
+          sessionType
         );
       } else {
         const newDays = (customPracticeDays[squadId] || []).filter(date => date !== dateToRemove);
         setCustomPracticeDays(prev => ({ ...prev, [squadId]: newDays }));
+        setCustomPracticeDaysCache(prev => ({
+          ...prev,
+            [sessionType]: { ...prev[sessionType], [squadId]: newDays }
+        }));
         await updatePracticeScheduleWithCustomDays(
           squadId, 
           practiceSchedules[squadId] || [], 
           customNoPracticeDays[squadId] || [], // Keep existing no-practice days
-          newDays // Pass the new practice days
+          newDays, // Pass the new practice days
+          sessionType
         );
       }
       
@@ -794,9 +855,24 @@ export default function CoachDashboard() {
     if (user && user.user_metadata.role === 'coach') {
       fetchAttendanceData();
       fetchAnalyticsData();
-      fetchPracticeSchedules();
+      // practiceSchedules loaded by sessionType effect, avoid duplicate fetch here
     }
-  }, [currentWeekOffset, user, selectedMonth, selectedYear]);
+  }, [currentWeekOffset, user, selectedMonth, selectedYear, sessionType]);
+
+  // Persist last used sessionType
+  useEffect(() => {
+    if (sessionType) {
+      try { localStorage.setItem('coach_last_session_type', sessionType); } catch {}
+    }
+  }, [sessionType]);
+
+  // Restore last sessionType on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('coach_last_session_type');
+      if (saved === 'practice' || saved === 'lift') setSessionType(saved);
+    } catch {}
+  }, []);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -817,72 +893,51 @@ export default function CoachDashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-6">
       <div className="max-w-screen-xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          {/* Left: Title & Mode Badge */}
           <div>
-            <h1 className="text-2xl font-bold text-yellow-300 mb-1">
+            <h1 className="text-2xl font-bold text-yellow-300 leading-tight">
               Welcome, Coach {user.user_metadata.firstName ?? user.email}
             </h1>
-            <p className="text-yellow-100 text-base font-semibold">
-              UCSD Fencing Team Management
-            </p>
+            <p className="text-yellow-100 text-sm font-semibold">UCSD Fencing Team Management</p>
+            {/* Removed mode badge per request */}
           </div>
-          <div className="flex gap-3 items-center">
-            <button
-              onClick={() => setViewMode('overview')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'overview' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Team Overview
-            </button>
-            <button
-              onClick={() => setViewMode('attendance')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'attendance' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Mark Attendance
-            </button>
-            <button
-              onClick={() => setViewMode('captains')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'captains' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Manage Captains
-            </button>
-            <button
-              onClick={() => setViewMode('analytics')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'analytics' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Analytics
-            </button>
-            <button
-              onClick={() => setViewMode('practice')}
-              className={`px-4 py-2 rounded transition-colors ${
-                viewMode === 'practice' 
-                  ? 'bg-blue-700 text-white' 
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              Practice Management
-            </button>
-            <button
-              onClick={handleLogout}
-              className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
-            >
-              Logout
-            </button>
+          {/* Right: Toolbars */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex bg-white/10 rounded-md overflow-hidden border border-white/20 backdrop-blur-sm h-9">
+              <button
+                onClick={() => setSessionType('practice')}
+                className={`px-4 text-sm font-medium transition h-full flex items-center ${sessionType === 'practice' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Practice</button>
+              <button
+                onClick={() => setSessionType('lift')}
+                className={`px-4 text-sm font-medium transition h-full flex items-center ${sessionType === 'lift' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+              >Lift</button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { key: 'overview', label: 'Team Overview' },
+                { key: 'attendance', label: 'Mark Attendance' },
+                // Captains management only relevant for practice session type
+                ...(sessionType === 'practice' ? [{ key: 'captains', label: 'Manage Captains' }] : []),
+                { key: 'analytics', label: 'Analytics' },
+                { key: 'practice', label: 'Practice Management' }
+              ].map(btn => (
+                <button
+                  key={btn.key}
+                  onClick={() => setViewMode(btn.key as any)}
+                  className={`h-9 px-4 rounded-md text-sm font-medium transition-colors flex items-center ${
+                    viewMode === btn.key ? 'bg-blue-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
+                >
+                  {btn.label}
+                </button>
+              ))}
+              <button
+                onClick={handleLogout}
+                className="h-9 px-4 rounded-md text-sm font-medium flex items-center bg-red-500 hover:bg-red-600 text-white transition-colors"
+              >Logout</button>
+            </div>
           </div>
         </div>
 
@@ -979,7 +1034,7 @@ export default function CoachDashboard() {
                                 <div className="text-xs">
                                   {!hasTodayPractice ? (
                                     <span className="text-gray-400 px-2 py-1 rounded bg-gray-100 font-bold italic">
-                                      Today: No Practice
+                                      Today: No {sessionType === 'practice' ? 'Practice' : 'Lift'}
                                     </span>
                                   ) : todayStatus ? (
                                     <span className={`px-2 py-1 rounded font-medium ${
@@ -1119,7 +1174,7 @@ export default function CoachDashboard() {
                         return (
                           <div key={dayName} className="border rounded p-3 bg-gray-50">
                             <h4 className="font-bold text-lg text-gray-600">
-                              {dayName} ({formatDate(currentDate)}) - No Practice
+                              {dayName} ({formatDate(currentDate)}) - No {sessionType === 'practice' ? 'Practice' : 'Lift'}
                             </h4>
                             <div className="text-sm text-gray-500 mt-2">
                               No practice scheduled for this day
@@ -1294,11 +1349,17 @@ export default function CoachDashboard() {
             </div>
           </div>
         ) : viewMode === 'practice' ? (
-          // Practice Management Mode
+          // Practice / Lift Management Mode
           <div className="bg-white rounded-lg shadow-lg p-6">
-            <div className="mb-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-2">Practice Management</h2>
-              <p className="text-gray-600">Set recurring practice days for each squad. Days marked as "No Practice" will show when team members mark attendance.</p>
+            <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 mb-1">{sessionType === 'practice' ? 'Practice' : 'Lift'} Management</h2>
+                <p className="text-gray-600 text-sm max-w-xl">Configure recurring {sessionType === 'practice' ? 'practice' : 'lift'} days and override with custom cancellations or extra sessions.</p>
+              </div>
+              <div className="flex bg-gray-100 rounded-md overflow-hidden border border-gray-300">
+                <button onClick={() => setSessionType('practice')} className={`px-4 py-2 text-sm font-medium transition ${sessionType === 'practice' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Practice</button>
+                <button onClick={() => setSessionType('lift')} className={`px-4 py-2 text-sm font-medium transition ${sessionType === 'lift' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Lift</button>
+              </div>
             </div>
 
             {message && (
@@ -1312,7 +1373,7 @@ export default function CoachDashboard() {
             )}
 
             <div className="space-y-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Practice Days</h3>
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">{sessionType === 'practice' ? 'Practice' : 'Lift'} Days</h3>
               
               {squads.map((squad) => {
                 const squadSchedule = practiceSchedules[squad.id] || [];
@@ -1357,11 +1418,7 @@ export default function CoachDashboard() {
                     </div>
                     
                     <div className="mt-3 text-sm text-gray-600">
-                      <span className="font-medium">Current Schedule:</span> {
-                        squadSchedule.length > 0 
-                          ? squadSchedule.map(day => day.charAt(0).toUpperCase() + day.slice(1)).join(', ')
-                          : 'No practice days set'
-                      }
+                      <span className="font-medium">Current Schedule:</span> {squadSchedule.length > 0 ? squadSchedule.map(day => day.charAt(0).toUpperCase() + day.slice(1)).join(', ') : `No ${sessionType === 'practice' ? 'practice' : 'lift'} days set`}
                     </div>
                   </div>
                 );
@@ -1370,7 +1427,7 @@ export default function CoachDashboard() {
               {/* Custom Days Management */}
               <div className="border-t pt-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-800">Custom Practice Days</h3>
+                  <h3 className="text-lg font-semibold text-gray-800">Custom {sessionType === 'practice' ? 'Practice' : 'Lift'} Days</h3>
                   <button
                     onClick={() => setShowCustomDaysModal(true)}
                     className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
@@ -1379,9 +1436,7 @@ export default function CoachDashboard() {
                   </button>
                 </div>
                 
-                <p className="text-gray-600 mb-4">
-                  Override regular schedule for specific dates or date ranges. Useful for holidays, tournaments, or extra practice sessions.
-                </p>
+                <p className="text-gray-600 mb-4">Override regular {sessionType === 'practice' ? 'practice' : 'lift'} schedule for specific dates or date ranges. Useful for holidays, tournaments, cancellations, or extra sessions.</p>
 
                 {/* Display existing custom days */}
                 <div className="space-y-4">
@@ -1442,11 +1497,8 @@ export default function CoachDashboard() {
                     );
                   })}
                   
-                  {[...squads, { id: 'all' }].every(squad => 
-                    (customNoPracticeDays[squad.id] || []).length === 0 && 
-                    (customPracticeDays[squad.id] || []).length === 0
-                  ) && (
-                    <p className="text-gray-500 italic">No custom days set. Click "Add Custom Days" to get started.</p>
+                  {[...squads, { id: 'all' }].every(squad => (customNoPracticeDays[squad.id] || []).length === 0 && (customPracticeDays[squad.id] || []).length === 0) && (
+                    <p className="text-gray-500 italic">No custom days set for {sessionType === 'practice' ? 'practice' : 'lift'}. Click "Add Custom Days" to get started.</p>
                   )}
                 </div>
               </div>
@@ -1454,10 +1506,11 @@ export default function CoachDashboard() {
               <div className="mt-6 p-4 bg-blue-50 rounded-lg">
                 <h4 className="font-semibold text-blue-900 mb-2">How it works:</h4>
                 <ul className="text-sm text-blue-800 space-y-1">
-                  <li>• Click on days to toggle practice schedule for each squad</li>
-                  <li>• Selected days (blue) are regular practice days</li>
-                  <li>• Unselected days will show as "No Practice" in attendance</li>
-                  <li>• Changes are saved automatically</li>
+                  <li>• Click on days to toggle {sessionType === 'practice' ? 'practice' : 'lift'} schedule for each squad</li>
+                  <li>• Selected days (blue) are regular {sessionType === 'practice' ? 'practice' : 'lift'} days</li>
+                  <li>• Unselected days will show as "No {sessionType === 'practice' ? 'Practice' : 'Lift'}" in attendance</li>
+                  <li>• Custom overrides add or remove single dates (including weekends)</li>
+                  <li>• Changes are saved immediately per mode</li>
                 </ul>
               </div>
             </div>
