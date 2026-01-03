@@ -5,6 +5,8 @@ import { User } from "@supabase/supabase-js";
 import Image from "next/image";
 import { supabase } from "../lib/supabaseClient";
 
+export const dynamic = 'force-dynamic';
+
 export default function LoginPage() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [username, setUsername] = useState("");
