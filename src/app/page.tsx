@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export default function LoginPage() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("changeme");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const router = useRouter();
 
