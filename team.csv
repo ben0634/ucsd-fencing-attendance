@@ -1,7 +1,6 @@
 firstName,lastName,password,role,squad_id,weapon,gender
 Dayus,Gohel,changeme,captain,2,epee,male
 Ben,Kim,changeme,athlete,3,epee,male
-Brandon,Kim,changeme,athlete,4,foil,male
 Ryan,Kim-Cogan,changeme,captain,5,saber,male
 Scott,Lao,changeme,athlete,6,foil,male
 Jacob,Levy,changeme,athlete,7,foil,male
@@ -14,7 +13,7 @@ Zehra,Anbarlilar,changeme,athlete,15,foil,female
 Bella,Balogh,changeme,athlete,16,epee,female
 Maya,Barnovitz,changeme,athlete,17,saber,female
 Zara,Fearns,changeme,athlete,19,saber,female
-Natalie Brooke,Gebala,changeme,athlete,20,epee,female
+Natalie,Gebala,changeme,athlete,20,epee,female
 Pia,Huber,changeme,athlete,21,epee,female
 Katherine,Kim,changeme,captain,22,foil,female
 Neta,Korol,changeme,athlete,23,foil,female
@@ -37,7 +36,7 @@ Arthur,Bonifield,changeme,athlete,40,saber,male
 Siena,Nguyen,changeme,athlete,41,saber,female
 Maya,Golovitser,changeme,athlete,42,saber,female
 Lucas,Zeng,changeme,athlete,43,foil,male
-Juan Ignacio,Calderon,changeme,coach,1,x,male
+JuanIgnacio,Calderon,changeme,coach,1,x,male
 
-Admin,Account,changeme,admin,N/A,N/A,N/A
+Admin,Account,adminaccess,admin,N/A,N/A,N/A
 

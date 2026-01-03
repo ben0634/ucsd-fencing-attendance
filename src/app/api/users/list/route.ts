@@ -26,13 +26,36 @@ export async function GET(request: NextRequest) {
     const { data: authUsers, error: listError } = await supabase.auth.admin.listUsers();
     
     if (listError) {
+      console.error('Error listing users from auth:', listError);
       return NextResponse.json({ error: listError.message }, { status: 500 });
+    }
+
+    if (!authUsers || !authUsers.users) {
+      console.error('No users data returned from auth');
+      return NextResponse.json({ error: 'No users data available' }, { status: 500 });
     }
 
     // Transform user data
     const users = authUsers.users.map(u => {
       const metadata = u.user_metadata;
       let squad = metadata.squad || metadata.squadId || 'N/A';
+      
+      // Convert squadId to squad name if needed
+      if (typeof squad === 'number') {
+        const squadMap: { [key: number]: string } = {
+          1: 'coach',
+          2: 'mens-epee',
+          3: 'mens-foil',
+          4: 'mens-saber',
+          5: 'womens-saber',
+          6: 'womens-foil',
+          7: 'womens-epee',
+        };
+        squad = squadMap[squad] || 'N/A';
+      }
+      
+      // Convert to string to avoid .includes errors
+      squad = String(squad);
       
       // Convert old squad format to new format if needed
       if (squad && !squad.includes('-') && squad !== 'N/A' && squad !== 'coach') {

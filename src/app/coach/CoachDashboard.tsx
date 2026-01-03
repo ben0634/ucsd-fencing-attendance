@@ -3,6 +3,7 @@ import React, { useEffect, useState, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabaseClient";
+import PasswordChangeModal from "../../components/PasswordChangeModal";
 
 export default function CoachDashboard() {
   const [user, setUser] = useState<User | null | undefined>(undefined);
@@ -33,6 +34,18 @@ export default function CoachDashboard() {
   const [customSpecificDates, setCustomSpecificDates] = useState<string[]>(['']);
   // sessionType toggle for Practice vs Lift modes
   const [sessionType, setSessionType] = useState<'practice' | 'lift'>('practice');
+  // Quarter management state
+  const [quarters, setQuarters] = useState<any[]>([]);
+  const [newQuarter, setNewQuarter] = useState({ name: '', startDate: '', endDate: '' });
+  const [editingQuarter, setEditingQuarter] = useState<any>(null);
+  const [savingQuarter, setSavingQuarter] = useState(false);
+  // Analytics view mode state
+  const [analyticsViewMode, setAnalyticsViewMode] = useState<'month' | 'quarter'>('month');
+  const [selectedAnalyticsQuarter, setSelectedAnalyticsQuarter] = useState<string | null>(null);
+  // Athlete quarter stats modal state
+  const [showAthleteStatsModal, setShowAthleteStatsModal] = useState(false);
+  const [selectedAthleteStats, setSelectedAthleteStats] = useState<any>(null);
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
   const router = useRouter();
 
   // When sessionType toggles, attempt to restore cached schedules; otherwise fetch
@@ -52,6 +65,8 @@ export default function CoachDashboard() {
   // Get current week's dates with offset
   const getWeekDates = () => {
     const today = new Date();
+    // Set to noon to avoid timezone issues near midnight
+    today.setHours(12, 0, 0, 0);
     today.setDate(today.getDate() + (currentWeekOffset * 7));
     
     const currentDay = today.getDay();
@@ -191,7 +206,7 @@ export default function CoachDashboard() {
     }
   };
 
-  // Fetch analytics data for the selected month
+  // Fetch analytics data for the selected month or quarter
   const fetchAnalyticsData = async () => {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -199,12 +214,24 @@ export default function CoachDashboard() {
       
       if (!accessToken) return;
 
-      // Get first and last day of selected month
-      const firstDay = new Date(selectedYear, selectedMonth, 1);
-      const lastDay = new Date(selectedYear, selectedMonth + 1, 0);
-      
-      const startDate = getLocalDateString(firstDay);
-      const endDate = getLocalDateString(lastDay);
+      let startDate: string;
+      let endDate: string;
+
+      if (analyticsViewMode === 'quarter' && selectedAnalyticsQuarter) {
+        // Get quarter date range
+        const quarter = quarters.find(q => q.id === selectedAnalyticsQuarter);
+        if (!quarter) return;
+        
+        startDate = quarter.start_date;
+        endDate = quarter.end_date;
+      } else {
+        // Get first and last day of selected month
+        const firstDay = new Date(selectedYear, selectedMonth, 1);
+        const lastDay = new Date(selectedYear, selectedMonth + 1, 0);
+        
+        startDate = getLocalDateString(firstDay);
+        endDate = getLocalDateString(lastDay);
+      }
 
       const response = await fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`, {
         headers: {
@@ -230,7 +257,8 @@ export default function CoachDashboard() {
         fetchAttendanceData(),
         fetchPracticeSchedules(),
         fetchSquads(),
-        fetchAnalyticsData()
+        fetchAnalyticsData(),
+        fetchQuarters()
       ]).catch(e => console.error('Auto refresh error:', e));
     }
   // Include sessionType so switching practice/lift also triggers full sync
@@ -238,18 +266,33 @@ export default function CoachDashboard() {
 
   // Generate days for the selected month (including weekends)
   const getMonthDays = () => {
-    const year = selectedYear;
-    const month = selectedMonth;
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    
-    const days = [];
-    for (let day = 1; day <= lastDay.getDate(); day++) {
-      const date = new Date(year, month, day);
-      // Include all days (Monday-Sunday)
-      days.push(date);
+    if (analyticsViewMode === 'quarter' && selectedAnalyticsQuarter) {
+      // Get quarter date range
+      const quarter = quarters.find(q => q.id === selectedAnalyticsQuarter);
+      if (!quarter) return [];
+      
+      const start = new Date(quarter.start_date + 'T00:00:00');
+      const end = new Date(quarter.end_date + 'T00:00:00');
+      
+      const days = [];
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        days.push(new Date(d));
+      }
+      return days;
+    } else {
+      // Month view
+      const year = selectedYear;
+      const month = selectedMonth;
+      const firstDay = new Date(year, month, 1);
+      const lastDay = new Date(year, month + 1, 0);
+      
+      const days = [];
+      for (let day = 1; day <= lastDay.getDate(); day++) {
+        const date = new Date(year, month, day);
+        days.push(date);
+      }
+      return days;
     }
-    return days;
   };
 
   // Check if there's practice for a squad on a given date (for analytics)
@@ -336,6 +379,14 @@ export default function CoachDashboard() {
     }
     
     return getAnalyticsAttendanceStatusWithSchedule(athleteId, date, memberSquadId);
+  };
+
+  const getAnalyticsAttendanceNotes = (athleteId: string, date: Date) => {
+    const dateString = getLocalDateString(date);
+    const record = analyticsData.find(
+      (a) => a.athlete_id === athleteId && a.date === dateString
+    );
+    return record?.notes || null;
   };
 
   // Format status for display in grid
@@ -448,6 +499,14 @@ export default function CoachDashboard() {
     return record?.status || null;
   };
 
+  const getAttendanceNotes = (athleteId: string, date: Date) => {
+    const dateString = getLocalDateString(date);
+    const record = attendanceData.find(
+      (a) => a.athlete_id === athleteId && a.date === dateString
+    );
+    return record?.notes || null;
+  };
+
   const markAttendance = async (athleteId: string, date: Date, status: string) => {
     const key = `${athleteId}-${getLocalDateString(date)}`;
     setMarkingAttendance(prev => ({ ...prev, [key]: true }));
@@ -469,7 +528,7 @@ export default function CoachDashboard() {
         },
         body: JSON.stringify({
           athleteId,
-          date: date.toISOString(),
+          date: getLocalDateString(date),
           status,
           sessionType
         })
@@ -833,6 +892,228 @@ export default function CoachDashboard() {
     }
   };
 
+  // Calculate detailed quarter stats for a specific athlete
+  const calculateAthleteQuarterStats = (memberId: string, memberName: string) => {
+    if (analyticsViewMode !== 'quarter' || !selectedAnalyticsQuarter) return;
+    
+    const quarter = quarters.find(q => q.id === selectedAnalyticsQuarter);
+    if (!quarter) return;
+    
+    // Only count practices up to today
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    const allDays = getMonthDays();
+    const days = allDays.filter(date => date <= today);
+    
+    let onTime = 0, late = 0, lateJustified = 0, excused = 0, missing = 0, notMarked = 0;
+    let totalPractices = 0;
+    
+    days.forEach(date => {
+      const status = getAnalyticsAttendanceStatus(memberId, date);
+      // Only count days where practice was scheduled (not 'no-practice' days)
+      if (status !== 'no-practice') {
+        totalPractices++;
+        if (status === 'on-time') onTime++;
+        else if (status === 'late') late++;
+        else if (status === 'late-justified') lateJustified++;
+        else if (status === 'excused') excused++;
+        else if (status === 'missing') missing++;
+        else if (status === null) notMarked++;
+      }
+    });
+    
+    const attended = onTime + late + lateJustified + excused;
+    const percentage = totalPractices > 0 ? Math.round((attended / totalPractices) * 100) : 0;
+    
+    setSelectedAthleteStats({
+      name: memberName,
+      quarterName: quarter.name,
+      totalPractices,
+      attended,
+      percentage,
+      onTime,
+      late,
+      lateJustified,
+      excused,
+      missing,
+      notMarked
+    });
+    setShowAthleteStatsModal(true);
+  };
+
+  // Quarter management functions
+  const fetchQuarters = async () => {
+    try {
+      const { data: seasonData } = await supabase
+        .from('seasons')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const currentSeason = seasonData?.[0];
+      if (!currentSeason) return;
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      
+      if (!accessToken) return;
+
+      const response = await fetch(`/api/quarters?seasonId=${currentSeason.id}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const { quarters } = await response.json();
+        setQuarters(quarters || []);
+      }
+    } catch (error) {
+      console.error('Error fetching quarters:', error);
+    }
+  };
+
+  const saveQuarter = async () => {
+    console.log('saveQuarter called with:', newQuarter);
+    
+    if (!newQuarter.name || !newQuarter.startDate || !newQuarter.endDate) {
+      console.log('Validation failed: missing fields');
+      setMessage('Please fill in all quarter fields');
+      setTimeout(() => setMessage(''), 3000);
+      return;
+    }
+
+    if (new Date(newQuarter.endDate) <= new Date(newQuarter.startDate)) {
+      console.log('Validation failed: end date before start date');
+      setMessage('End date must be after start date');
+      setTimeout(() => setMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setSavingQuarter(true);
+
+      const { data: seasonData, error: seasonError } = await supabase
+        .from('seasons')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      console.log('Season query result:', { seasonData, seasonError });
+
+      const currentSeason = seasonData?.[0];
+
+      if (!currentSeason) {
+        setMessage('No active season found. Please create a season first.');
+        setTimeout(() => setMessage(''), 3000);
+        setSavingQuarter(false);
+        return;
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      
+      console.log('Access token:', accessToken ? 'present' : 'missing');
+      
+      if (!accessToken) {
+        setMessage('Authentication error');
+        setTimeout(() => setMessage(''), 3000);
+        setSavingQuarter(false);
+        return;
+      }
+
+      console.log('Sending quarter data:', {
+        seasonId: currentSeason.id,
+        name: newQuarter.name,
+        startDate: newQuarter.startDate,
+        endDate: newQuarter.endDate
+      });
+
+      const response = await fetch('/api/quarters', {
+        method: editingQuarter ? 'PUT' : 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ...(editingQuarter && { id: editingQuarter.id }),
+          seasonId: currentSeason.id,
+          name: newQuarter.name,
+          startDate: newQuarter.startDate,
+          endDate: newQuarter.endDate
+        })
+      });
+
+      console.log('Quarter API response status:', response.status);
+
+      if (response.ok) {
+        await fetchQuarters();
+        setNewQuarter({ name: '', startDate: '', endDate: '' });
+        setEditingQuarter(null);
+        setMessage(`Quarter ${editingQuarter ? 'updated' : 'created'} successfully`);
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        const error = await response.json();
+        console.error('Quarter API error:', error);
+        setMessage(error.error || 'Failed to save quarter');
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (error) {
+      console.error('Error saving quarter:', error);
+      setMessage('Error saving quarter');
+      setTimeout(() => setMessage(''), 3000);
+    } finally {
+      setSavingQuarter(false);
+    }
+  };
+
+  const deleteQuarter = async (quarterId: string) => {
+    if (!confirm('Are you sure you want to delete this quarter?')) return;
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      
+      if (!accessToken) return;
+
+      const response = await fetch(`/api/quarters?id=${quarterId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        await fetchQuarters();
+        setMessage('Quarter deleted successfully');
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        setMessage('Failed to delete quarter');
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (error) {
+      console.error('Error deleting quarter:', error);
+      setMessage('Error deleting quarter');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
+  const startEditQuarter = (quarter: any) => {
+    setEditingQuarter(quarter);
+    setNewQuarter({
+      name: quarter.name,
+      startDate: quarter.start_date,
+      endDate: quarter.end_date
+    });
+  };
+
+  const cancelEditQuarter = () => {
+    setEditingQuarter(null);
+    setNewQuarter({ name: '', startDate: '', endDate: '' });
+  };
+
   useEffect(() => {
     const checkSession = async () => {
       const { data } = await supabase.auth.getSession();
@@ -842,6 +1123,11 @@ export default function CoachDashboard() {
       if (!currentUser || currentUser.user_metadata.role !== "coach") {
         router.push("/");
         return;
+      }
+
+      // Check if user needs to change password
+      if (!currentUser.user_metadata?.passwordChanged) {
+        setShowPasswordChange(true);
       }
 
       await fetchSquads();
@@ -858,6 +1144,13 @@ export default function CoachDashboard() {
       // practiceSchedules loaded by sessionType effect, avoid duplicate fetch here
     }
   }, [currentWeekOffset, user, selectedMonth, selectedYear, sessionType]);
+
+  // Refetch analytics when quarter selection or view mode changes
+  useEffect(() => {
+    if (user && user.user_metadata.role === 'coach') {
+      fetchAnalyticsData();
+    }
+  }, [analyticsViewMode, selectedAnalyticsQuarter]);
 
   // Persist last used sessionType
   useEffect(() => {
@@ -881,7 +1174,9 @@ export default function CoachDashboard() {
 
   // Print function for analytics data
   const handlePrint = () => {
-    window.print();
+    setTimeout(() => {
+      window.print();
+    }, 0);
   };
 
   if (loading) return <p className="p-4">Loading...</p>;
@@ -891,51 +1186,65 @@ export default function CoachDashboard() {
   const attendanceStats = calculateAttendanceStats();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-4 sm:p-6">
+      {showPasswordChange && user && (
+        <PasswordChangeModal
+          username={user.user_metadata?.username || user.email?.split('@')[0] || ''}
+          onPasswordChanged={() => {
+            setShowPasswordChange(false);
+            // Refresh user data
+            supabase.auth.getSession().then(({ data }) => {
+              if (data.session?.user) setUser(data.session.user);
+            });
+          }}
+        />
+      )}
+      
       <div className="max-w-screen-xl mx-auto">
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 sm:mb-6 flex flex-col gap-3 sm:gap-4">
           {/* Left: Title & Mode Badge */}
           <div>
-            <h1 className="text-2xl font-bold text-yellow-300 leading-tight">
+            <h1 className="text-2xl sm:text-3xl font-bold text-yellow-300 leading-tight tracking-tight">
               Welcome, Coach {user.user_metadata.firstName ?? user.email}
             </h1>
-            <p className="text-yellow-100 text-sm font-semibold">UCSD Fencing Team Management</p>
+            <p className="text-yellow-100 text-sm sm:text-base font-semibold mt-1">UCSD Fencing Team Management</p>
             {/* Removed mode badge per request */}
           </div>
           {/* Right: Toolbars */}
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex bg-white/10 rounded-md overflow-hidden border border-white/20 backdrop-blur-sm h-9">
+            <div className="flex bg-white/20 backdrop-blur-sm rounded-xl overflow-hidden border-2 border-white/30 h-10 sm:h-11 shadow-lg">
               <button
                 onClick={() => setSessionType('practice')}
-                className={`px-4 text-sm font-medium transition h-full flex items-center ${sessionType === 'practice' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+                className={`px-4 sm:px-6 text-sm sm:text-base font-semibold transition-all duration-200 h-full flex items-center ${sessionType === 'practice' ? 'bg-white text-indigo-600 shadow-md' : 'text-white hover:bg-white/10'}`}
               >Practice</button>
               <button
                 onClick={() => setSessionType('lift')}
-                className={`px-4 text-sm font-medium transition h-full flex items-center ${sessionType === 'lift' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+                className={`px-4 sm:px-6 text-sm sm:text-base font-semibold transition-all duration-200 h-full flex items-center ${sessionType === 'lift' ? 'bg-white text-indigo-600 shadow-md' : 'text-white hover:bg-white/10'}`}
               >Lift</button>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               {[
-                { key: 'overview', label: 'Team Overview' },
-                { key: 'attendance', label: 'Mark Attendance' },
+                { key: 'overview', label: 'Overview', shortLabel: 'Overview' },
+                { key: 'attendance', label: 'Mark Attendance', shortLabel: 'Attendance' },
                 // Captains management only relevant for practice session type
-                ...(sessionType === 'practice' ? [{ key: 'captains', label: 'Manage Captains' }] : []),
-                { key: 'analytics', label: 'Analytics' },
-                { key: 'practice', label: 'Practice Management' }
+                ...(sessionType === 'practice' ? [{ key: 'captains', label: 'Manage Captains', shortLabel: 'Captains' }] : []),
+                { key: 'analytics', label: 'Analytics', shortLabel: 'Analytics' },
+                { key: 'practice', label: 'Practice Management', shortLabel: 'Practice' }
               ].map(btn => (
                 <button
                   key={btn.key}
                   onClick={() => setViewMode(btn.key as any)}
-                  className={`h-9 px-4 rounded-md text-sm font-medium transition-colors flex items-center ${
-                    viewMode === btn.key ? 'bg-blue-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  className={`h-10 sm:h-11 px-3 sm:px-5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center shadow-md hover:shadow-lg transform hover:scale-105 ${
+                    viewMode === btn.key ? 'bg-white text-indigo-600' : 'bg-indigo-600 hover:bg-indigo-500 text-white border-2 border-white/20'
                   }`}
                 >
-                  {btn.label}
+                  <span className="hidden sm:inline">{btn.label}</span>
+                  <span className="sm:hidden">{btn.shortLabel}</span>
                 </button>
               ))}
               <button
                 onClick={handleLogout}
-                className="h-9 px-4 rounded-md text-sm font-medium flex items-center bg-red-500 hover:bg-red-600 text-white transition-colors"
+                className="h-8 sm:h-9 px-2 sm:px-4 rounded-md text-xs sm:text-sm font-medium flex items-center bg-red-500 hover:bg-red-600 text-white transition-colors"
               >Logout</button>
             </div>
           </div>
@@ -943,53 +1252,56 @@ export default function CoachDashboard() {
 
         {viewMode === 'overview' ? (
           // Team Overview Mode
-          <div className="space-y-6">
-            <div className="bg-white rounded-lg shadow-lg p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-gray-900">Team Overview</h2>
+          <div className="space-y-4 sm:space-y-6">
+            <div className="bg-white rounded-lg shadow-lg p-3 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6 gap-3">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Team Overview</h2>
                 
                 {/* Week Navigation */}
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={goToPreviousWeek}
-                    className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                  >
-                    ← Previous Week
-                  </button>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                  <div className="flex items-center justify-between sm:justify-start gap-2">
+                    <button
+                      onClick={goToPreviousWeek}
+                      className="px-2 sm:px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs sm:text-sm"
+                    >
+                      <span className="hidden sm:inline">← Previous Week</span>
+                      <span className="sm:hidden">← Prev</span>
+                    </button>
+                    
+                    {currentWeekOffset !== 0 && (
+                      <button
+                        onClick={goToCurrentWeek}
+                        className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-xs sm:text-sm"
+                      >
+                        Today
+                      </button>
+                    )}
+                    
+                    <button
+                      onClick={goToNextWeek}
+                      className="px-2 sm:px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs sm:text-sm"
+                    >
+                      <span className="hidden sm:inline">Next Week →</span>
+                      <span className="sm:hidden">Next →</span>
+                    </button>
+                  </div>
                   
-                  <span className="text-sm font-medium text-gray-700">
+                  <span className="text-xs sm:text-sm font-medium text-gray-700 text-center sm:text-left">
                     {currentWeekOffset === 0 ? "This Week" : 
                      currentWeekOffset === -1 ? "Last Week" :
                      currentWeekOffset === 1 ? "Next Week" :
                      currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
                      `${currentWeekOffset} Weeks Ahead`} ({formatWeekRange(weekDates)})
                   </span>
-                  
-                  <div className="flex gap-2">
-                    {currentWeekOffset !== 0 && (
-                      <button
-                        onClick={goToCurrentWeek}
-                        className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-sm"
-                      >
-                        Current
-                      </button>
-                    )}
-                    <button
-                      onClick={goToNextWeek}
-                      className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                    >
-                      Next Week →
-                    </button>
-                  </div>
                 </div>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
                 {squads.map(squad => (
-                  <div key={squad.id} className="border rounded-lg p-4 bg-gray-50">
-                    <h3 className="font-bold text-lg text-gray-900 mb-3">{squad.displayName}</h3>
+                  <div key={squad.id} className="border rounded-lg p-3 sm:p-4 bg-gray-50">
+                    <h3 className="font-bold text-base sm:text-lg text-gray-900 mb-2 sm:mb-3">{squad.displayName}</h3>
                     
-                    <div className="space-y-2 mb-4">
+                    <div className="space-y-1.5 sm:space-y-2 mb-3 sm:mb-4">
                       {squad.members.map((member: any) => {
                         // Get this week's attendance summary for this member - include all days (including weekends)
                         const practiceWeekdays = weekDates.filter((date, index) => {
@@ -1015,29 +1327,30 @@ export default function CoachDashboard() {
                         const isTodayCurrentWeek = currentWeekOffset === 0;
                         
                         return (
-                          <div key={member.id} className="flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2">
+                          <div key={member.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-xs sm:text-sm gap-1">
+                            <div className="flex items-center gap-1.5 sm:gap-2">
                               <span className="font-medium text-gray-900">
                                 {member.full_name}
                               </span>
                               {member.role === 'captain' && (
-                                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                <span className="text-[10px] sm:text-xs bg-blue-100 text-blue-800 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded">
                                   Captain 🔱
                                 </span>
                               )}
                             </div>
                             
                             {/* Today's status only */}
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1 sm:gap-2">
                               {/* Today's status for current week */}
                               {isTodayCurrentWeek && (
-                                <div className="text-xs">
+                                <div className="text-[10px] sm:text-xs">
                                   {!hasTodayPractice ? (
-                                    <span className="text-gray-400 px-2 py-1 rounded bg-gray-100 font-bold italic">
-                                      Today: No {sessionType === 'practice' ? 'Practice' : 'Lift'}
+                                    <span className="text-gray-400 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded bg-gray-100 font-bold italic">
+                                      <span className="hidden sm:inline">Today: No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
+                                      <span className="sm:hidden">No {sessionType === 'practice' ? 'Prac' : 'Lift'}</span>
                                     </span>
                                   ) : todayStatus ? (
-                                    <span className={`px-2 py-1 rounded font-medium ${
+                                    <span className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded font-medium ${
                                       todayStatus === 'on-time' ? 'bg-green-100 text-green-700' :
                                       todayStatus === 'late' ? 'bg-yellow-100 text-yellow-700' :
                                       todayStatus === 'late-justified' ? 'bg-green-100 text-green-700' :
@@ -1101,9 +1414,9 @@ export default function CoachDashboard() {
           </div>
         ) : viewMode === 'attendance' ? (
           // Attendance Management Mode
-          <div className="bg-white rounded-lg shadow-lg p-6">
+          <div className="bg-white rounded-lg shadow-lg p-3 sm:p-6">
             {message && (
-              <div className={`mb-4 p-3 rounded ${
+              <div className={`mb-3 sm:mb-4 p-2 sm:p-3 rounded text-xs sm:text-base ${
                 message.startsWith('Error') 
                   ? 'bg-red-100 text-red-700 border border-red-300' 
                   : 'bg-green-100 text-green-700 border border-green-300'
@@ -1112,45 +1425,49 @@ export default function CoachDashboard() {
               </div>
             )}
 
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={goToPreviousWeek}
-                  className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                >
-                  ← Previous Week
-                </button>
+            <div className="flex flex-col gap-3 mb-4 sm:mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <div className="flex items-center justify-between sm:justify-start gap-2">
+                  <button
+                    onClick={goToPreviousWeek}
+                    className="px-2 sm:px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs sm:text-sm"
+                  >
+                    <span className="hidden sm:inline">← Previous Week</span>
+                    <span className="sm:hidden">← Prev</span>
+                  </button>
+                  
+                  {currentWeekOffset !== 0 && (
+                    <button
+                      onClick={goToCurrentWeek}
+                      className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-xs sm:text-sm"
+                    >
+                      Today
+                    </button>
+                  )}
+                  
+                  <button
+                    onClick={goToNextWeek}
+                    className="px-2 sm:px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs sm:text-sm"
+                  >
+                    <span className="hidden sm:inline">Next Week →</span>
+                    <span className="sm:hidden">Next →</span>
+                  </button>
+                </div>
                 
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Attendance Management - {currentWeekOffset === 0 ? "This Week" : 
+                <h2 className="text-sm sm:text-lg font-semibold text-gray-900">
+                  <span className="hidden sm:inline">Attendance Management - </span>
+                  {currentWeekOffset === 0 ? "This Week" : 
                    currentWeekOffset === -1 ? "Last Week" :
                    currentWeekOffset === 1 ? "Next Week" :
                    currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
                    `${currentWeekOffset} Weeks Ahead`} ({formatWeekRange(weekDates)})
                 </h2>
-                
-                <div className="flex gap-2">
-                  {currentWeekOffset !== 0 && (
-                    <button
-                      onClick={goToCurrentWeek}
-                      className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-sm"
-                    >
-                      Current
-                    </button>
-                  )}
-                  <button
-                    onClick={goToNextWeek}
-                    className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                  >
-                    Next Week →
-                  </button>
-                </div>
               </div>
 
               <select
                 value={selectedSquad || ''}
                 onChange={(e) => setSelectedSquad(e.target.value || null)}
-                className="px-3 py-2 border rounded text-gray-900"
+                className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base w-full sm:w-auto"
               >
                 <option value="">All Squads</option>
                 {squads.map(squad => (
@@ -1162,79 +1479,98 @@ export default function CoachDashboard() {
             {squads
               .filter(squad => !selectedSquad || squad.id === selectedSquad)
               .map(squad => (
-                <div key={squad.id} className="mb-8">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">{squad.displayName}</h3>
+                <div key={squad.id} className="mb-4 sm:mb-8">
+                  <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4">{squad.displayName}</h3>
                   
-                  <div className="space-y-4">
+                  <div className="space-y-3 sm:space-y-4">
                     {dayNames.map((dayName, dayIndex) => {
                       const currentDate = weekDates[dayIndex];
                       const hasSquadPractice = hasPractice(squad.id, currentDate);
                       
                       if (!hasSquadPractice) {
                         return (
-                          <div key={dayName} className="border rounded p-3 bg-gray-50">
-                            <h4 className="font-bold text-lg text-gray-600">
-                              {dayName} ({formatDate(currentDate)}) - No {sessionType === 'practice' ? 'Practice' : 'Lift'}
+                          <div key={dayName} className="border rounded p-2 sm:p-3 bg-gray-50">
+                            <h4 className="font-bold text-sm sm:text-lg text-gray-600">
+                              <span className="hidden sm:inline">{dayName} ({formatDate(currentDate)}) - No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
+                              <span className="sm:hidden">{dayName.substring(0, 3)} {formatDate(currentDate)} - No {sessionType === 'practice' ? 'Prac' : 'Lift'}</span>
                             </h4>
-                            <div className="text-sm text-gray-500 mt-2">
-                              No practice scheduled for this day
+                            <div className="text-xs sm:text-sm text-gray-500 mt-1 sm:mt-2">
+                              <span className="hidden sm:inline">No practice scheduled for this day</span>
+                              <span className="sm:hidden">Not scheduled</span>
                             </div>
                           </div>
                         );
                       }
 
                       return (
-                        <div key={dayName} className="border rounded p-3">
-                          <h4 className="font-bold text-lg mb-3 text-gray-900">
-                            {dayName} ({formatDate(currentDate)})
+                        <div key={dayName} className="border rounded p-2 sm:p-3">
+                          <h4 className="font-bold text-sm sm:text-lg mb-2 sm:mb-3 text-gray-900">
+                            <span className="hidden sm:inline">{dayName} ({formatDate(currentDate)})</span>
+                            <span className="sm:hidden">{dayName.substring(0, 3)} {formatDate(currentDate)}</span>
                           </h4>
                           
-                          <div className="grid gap-2">
+                          <div className="grid gap-1.5 sm:gap-2">
                             {squad.members.map((member: any) => {
                               const currentStatus = getAttendanceStatus(member.id, currentDate);
                               const markingKey = `${member.id}-${getLocalDateString(currentDate)}`;
                               const isMarking = markingAttendance[markingKey];
                               
                               return (
-                                <div key={member.id} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                                <div key={member.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-1.5 sm:p-2 bg-gray-50 rounded gap-1.5">
                                   <div className="flex-1">
-                                    <span className="font-medium text-gray-900">
+                                    <span className="font-medium text-gray-900 text-xs sm:text-base">
                                       {member.full_name}
                                       {member.role === 'captain' && (
-                                        <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                        <span className="ml-1 sm:ml-2 text-[10px] sm:text-xs bg-blue-100 text-blue-800 px-1 sm:px-2 py-0.5 sm:py-1 rounded">
                                           Captain 🔱
                                         </span>
                                       )}
                                     </span>
-                                    {currentStatus && (
-                                      <div className="text-xs text-gray-600 mt-1">
-                                        Current: <span className={`font-medium ${
-                                          currentStatus === 'on-time' ? 'text-green-600' :
-                                          currentStatus === 'late' ? 'text-yellow-600' :
-                                          currentStatus === 'late-justified' ? 'text-green-600' :
-                                          currentStatus === 'excused' ? 'text-blue-600' :
-                                          'text-red-600'
-                                        }`}>
-                                          {currentStatus === 'on-time' ? 'On Time' :
-                                           currentStatus === 'late' ? 'Late' :
-                                           currentStatus === 'late-justified' ? 'Late (Justified)' :
-                                           currentStatus === 'excused' ? 'Excused' :
-                                           'Missing'}
-                                        </span>
-                                      </div>
-                                    )}
+                                    {currentStatus && (() => {
+                                      const notes = getAttendanceNotes(member.id, currentDate);
+                                      return (
+                                        <div className="text-[10px] sm:text-xs text-gray-600 mt-0.5 sm:mt-1 flex items-center gap-1">
+                                          <span>
+                                            Current: <span className={`font-medium ${
+                                              currentStatus === 'on-time' ? 'text-green-600' :
+                                              currentStatus === 'late' ? 'text-yellow-600' :
+                                              currentStatus === 'late-justified' ? 'text-green-600' :
+                                              currentStatus === 'excused' ? 'text-blue-600' :
+                                              'text-red-600'
+                                            }`}>
+                                              {currentStatus === 'on-time' ? 'On Time' :
+                                               currentStatus === 'late' ? 'Late' :
+                                               currentStatus === 'late-justified' ? 'Late (Justified)' :
+                                               currentStatus === 'excused' ? 'Excused' :
+                                               'Missing'}
+                                            </span>
+                                          </span>
+                                          {notes && (
+                                            <div className="relative group">
+                                              <span className="inline-flex items-center text-blue-600">
+                                                📝
+                                              </span>
+                                              <div className="hidden group-hover:block absolute z-50 bg-gray-900 text-white text-xs rounded px-2 py-1 -translate-y-full -mt-1 left-0 whitespace-normal max-w-xs shadow-lg">
+                                                {notes}
+                                                <div className="absolute top-full left-2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                   
-                                  <div className="flex gap-2">
+                                  <div className="flex flex-wrap gap-1 sm:gap-2">
                                     {isMarking && (
-                                      <div className="text-sm text-gray-500 mr-2">Updating...</div>
+                                      <div className="text-xs sm:text-sm text-gray-500 w-full sm:w-auto sm:mr-2">Updating...</div>
                                     )}
                                     {['on-time', 'late-justified', 'late', 'excused', 'missing'].map((status) => (
                                       <button
                                         key={status}
                                         onClick={() => markAttendance(member.id, currentDate, status)}
                                         disabled={isMarking}
-                                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                                        className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-[10px] sm:text-xs font-medium transition-colors ${
                                           currentStatus === status 
                                             ? 'ring-2 ring-blue-300 ' 
                                             : ''
@@ -1267,9 +1603,9 @@ export default function CoachDashboard() {
           </div>
         ) : viewMode === 'captains' ? (
           // Captain Management Mode
-          <div className="bg-white rounded-lg shadow-lg p-6">
+          <div className="bg-white rounded-lg shadow-lg p-3 sm:p-6">
             {message && (
-              <div className={`mb-4 p-3 rounded ${
+              <div className={`mb-3 sm:mb-4 p-2 sm:p-3 rounded text-xs sm:text-base ${
                 message.startsWith('Error') 
                   ? 'bg-red-100 text-red-700 border border-red-300' 
                   : 'bg-green-100 text-green-700 border border-green-300'
@@ -1278,31 +1614,31 @@ export default function CoachDashboard() {
               </div>
             )}
 
-            <div className="mb-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Manage Squad Captains</h2>
-              <p className="text-gray-600 text-sm mb-4">
+            <div className="mb-4 sm:mb-6">
+              <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-2 sm:mb-4">Manage Squad Captains</h2>
+              <p className="text-gray-600 text-xs sm:text-sm mb-3 sm:mb-4">
                 Select who should be the captain for each squad. Only one captain per squad is allowed.
               </p>
             </div>
 
-            <div className="space-y-6">
+            <div className="space-y-3 sm:space-y-6">
               {squads.map(squad => {
                 const currentCaptain = squad.members.find((m: any) => m.role === 'captain');
                 const isUpdating = updatingCaptain[squad.id];
                 
                 return (
-                  <div key={squad.id} className="border rounded-lg p-4 bg-gray-50">
-                    <div className="flex items-center justify-between">
+                  <div key={squad.id} className="border rounded-lg p-3 sm:p-4 bg-gray-50">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                       <div>
-                        <h3 className="font-bold text-lg text-gray-900 mb-1">{squad.displayName}</h3>
-                        <p className="text-sm text-gray-600">
+                        <h3 className="font-bold text-base sm:text-lg text-gray-900 mb-1">{ squad.displayName}</h3>
+                        <p className="text-xs sm:text-sm text-gray-600">
                           Current Captain: {currentCaptain ? currentCaptain.full_name : 'None'}
                         </p>
                       </div>
                       
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 sm:gap-3">
                         {isUpdating && (
-                          <span className="text-sm text-gray-500">Updating...</span>
+                          <span className="text-xs sm:text-sm text-gray-500">Updating...</span>
                         )}
                         <select
                           value={currentCaptain?.id || ''}
@@ -1312,7 +1648,7 @@ export default function CoachDashboard() {
                             }
                           }}
                           disabled={isUpdating}
-                          className="px-3 py-2 border rounded text-gray-900 min-w-[200px]"
+                          className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base w-full sm:min-w-[200px]"
                         >
                           <option value="">Select Captain...</option>
                           {squad.members.map((member: any) => (
@@ -1325,9 +1661,9 @@ export default function CoachDashboard() {
                       </div>
                     </div>
                     
-                    <div className="mt-3 text-sm text-gray-600">
+                    <div className="mt-2 sm:mt-3 text-xs sm:text-sm text-gray-600">
                       <p><strong>Squad Members:</strong></p>
-                      <div className="flex flex-wrap gap-2 mt-1">
+                      <div className="flex flex-wrap gap-1.5 sm:gap-2 mt-1">
                         {squad.members.map((member: any) => (
                           <span 
                             key={member.id}
@@ -1350,20 +1686,20 @@ export default function CoachDashboard() {
           </div>
         ) : viewMode === 'practice' ? (
           // Practice / Lift Management Mode
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="bg-white rounded-lg shadow-lg p-3 sm:p-6">
+            <div className="mb-4 sm:mb-6 flex flex-col gap-3 sm:gap-4">
               <div>
-                <h2 className="text-xl font-bold text-gray-900 mb-1">{sessionType === 'practice' ? 'Practice' : 'Lift'} Management</h2>
-                <p className="text-gray-600 text-sm max-w-xl">Configure recurring {sessionType === 'practice' ? 'practice' : 'lift'} days and override with custom cancellations or extra sessions.</p>
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-1">{sessionType === 'practice' ? 'Practice' : 'Lift'} Management</h2>
+                <p className="text-gray-600 text-xs sm:text-sm max-w-xl">Configure recurring {sessionType === 'practice' ? 'practice' : 'lift'} days and override with custom cancellations or extra sessions.</p>
               </div>
-              <div className="flex bg-gray-100 rounded-md overflow-hidden border border-gray-300">
-                <button onClick={() => setSessionType('practice')} className={`px-4 py-2 text-sm font-medium transition ${sessionType === 'practice' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Practice</button>
-                <button onClick={() => setSessionType('lift')} className={`px-4 py-2 text-sm font-medium transition ${sessionType === 'lift' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Lift</button>
+              <div className="flex bg-gray-100 rounded-md overflow-hidden border border-gray-300 w-full sm:w-auto">
+                <button onClick={() => setSessionType('practice')} className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${sessionType === 'practice' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Practice</button>
+                <button onClick={() => setSessionType('lift')} className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${sessionType === 'lift' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Lift</button>
               </div>
             </div>
 
             {message && (
-              <div className={`mb-4 p-3 border rounded ${
+              <div className={`mb-3 sm:mb-4 p-2 sm:p-3 border rounded text-xs sm:text-base ${
                 message.includes('Error')
                   ? 'bg-yellow-100 border-yellow-400 text-yellow-800'
                   : 'bg-green-100 border-green-400 text-green-700'
@@ -1372,8 +1708,8 @@ export default function CoachDashboard() {
               </div>
             )}
 
-            <div className="space-y-6">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">{sessionType === 'practice' ? 'Practice' : 'Lift'} Days</h3>
+            <div className="space-y-4 sm:space-y-6">
+              <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-3 sm:mb-4">{sessionType === 'practice' ? 'Practice' : 'Lift'} Days</h3>
               
               {squads.map((squad) => {
                 const squadSchedule = practiceSchedules[squad.id] || [];
@@ -1381,15 +1717,15 @@ export default function CoachDashboard() {
                 const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
                 
                 return (
-                  <div key={squad.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-md font-semibold text-gray-900">{squad.displayName}</h4>
-                      <span className="text-sm text-gray-500">
+                  <div key={squad.id} className="border border-gray-200 rounded-lg p-2 sm:p-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3 sm:mb-4">
+                      <h4 className="text-sm sm:text-md font-semibold text-gray-900">{squad.displayName}</h4>
+                      <span className="text-xs sm:text-sm text-gray-500">
                         {squad.members.length} members
                       </span>
                     </div>
                     
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1.5 sm:gap-2">
                       {daysOfWeek.map((day) => {
                         const isSelected = squadSchedule.includes(day.toLowerCase());
                         
@@ -1398,26 +1734,30 @@ export default function CoachDashboard() {
                             key={day}
                             onClick={() => !isUpdating && togglePracticeDay(squad.id, day.toLowerCase())}
                             disabled={isUpdating}
-                            className={`px-4 py-2 rounded-lg border-2 transition-colors ${
+                            className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg border-2 transition-colors text-xs sm:text-base ${
                               isSelected
                                 ? 'bg-blue-500 border-blue-500 text-white hover:bg-blue-600'
                                 : 'bg-white border-gray-300 text-gray-700 hover:border-blue-300 hover:text-blue-600'
                             } ${isUpdating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                           >
                             {isUpdating ? (
-                              <span className="flex items-center gap-2">
+                              <span className="flex items-center gap-1">
                                 <span className="animate-spin">⚪</span>
-                                {day}
+                                <span className="hidden sm:inline">{day}</span>
+                                <span className="sm:hidden">{day.substring(0, 3)}</span>
                               </span>
                             ) : (
-                              day
+                              <>
+                                <span className="hidden sm:inline">{day}</span>
+                                <span className="sm:hidden">{day.substring(0, 3)}</span>
+                              </>
                             )}
                           </button>
                         );
                       })}
                     </div>
                     
-                    <div className="mt-3 text-sm text-gray-600">
+                    <div className="mt-2 sm:mt-3 text-xs sm:text-sm text-gray-600">
                       <span className="font-medium">Current Schedule:</span> {squadSchedule.length > 0 ? squadSchedule.map(day => day.charAt(0).toUpperCase() + day.slice(1)).join(', ') : `No ${sessionType === 'practice' ? 'practice' : 'lift'} days set`}
                     </div>
                   </div>
@@ -1425,21 +1765,21 @@ export default function CoachDashboard() {
               })}
               
               {/* Custom Days Management */}
-              <div className="border-t pt-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-800">Custom {sessionType === 'practice' ? 'Practice' : 'Lift'} Days</h3>
+              <div className="border-t pt-4 sm:pt-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-800">Custom {sessionType === 'practice' ? 'Practice' : 'Lift'} Days</h3>
                   <button
                     onClick={() => setShowCustomDaysModal(true)}
-                    className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-xs sm:text-sm"
                   >
                     Add Custom Days
                   </button>
                 </div>
                 
-                <p className="text-gray-600 mb-4">Override regular {sessionType === 'practice' ? 'practice' : 'lift'} schedule for specific dates or date ranges. Useful for holidays, tournaments, cancellations, or extra sessions.</p>
+                <p className="text-gray-600 mb-3 sm:mb-4 text-xs sm:text-sm">Override regular {sessionType === 'practice' ? 'practice' : 'lift'} schedule for specific dates or date ranges. Useful for holidays, tournaments, cancellations, or extra sessions.</p>
 
                 {/* Display existing custom days */}
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   {[...squads, { id: 'all', displayName: 'Whole Team' }].map((squad) => {
                     const noPracticeDays = customNoPracticeDays[squad.id] || [];
                     const practiceDays = customPracticeDays[squad.id] || [];
@@ -1447,22 +1787,22 @@ export default function CoachDashboard() {
                     if (noPracticeDays.length === 0 && practiceDays.length === 0) return null;
                     
                     return (
-                      <div key={`custom-${squad.id}`} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
-                        <h4 className="font-medium text-gray-900 mb-2">{squad.displayName}</h4>
+                      <div key={`custom-${squad.id}`} className="border border-gray-200 rounded-lg p-2 sm:p-4 bg-gray-50">
+                        <h4 className="font-medium text-gray-900 mb-2 text-sm sm:text-base">{squad.displayName}</h4>
                         
                         {noPracticeDays.length > 0 && (
                           <div className="mb-3">
-                            <h5 className="text-sm font-medium text-red-700 mb-2">No Practice Days:</h5>
-                            <div className="flex flex-wrap gap-2">
+                            <h5 className="text-xs sm:text-sm font-medium text-red-700 mb-2">No Practice Days:</h5>
+                            <div className="flex flex-wrap gap-1.5 sm:gap-2">
                               {noPracticeDays.map((date) => (
                                 <span
                                   key={date}
-                                  className="inline-flex items-center gap-2 px-3 py-1 bg-red-100 text-red-700 rounded-lg text-sm"
+                                  className="inline-flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1 bg-red-100 text-red-700 rounded-lg text-[10px] sm:text-sm"
                                 >
                                   {new Date(date + 'T00:00:00').toLocaleDateString()}
                                   <button
                                     onClick={() => removeCustomDay(squad.id, date, 'no-practice')}
-                                    className="text-red-500 hover:text-red-700"
+                                    className="text-red-500 hover:text-red-700 text-sm sm:text-base"
                                   >
                                     ×
                                   </button>
@@ -1474,12 +1814,12 @@ export default function CoachDashboard() {
                         
                         {practiceDays.length > 0 && (
                           <div>
-                            <h5 className="text-sm font-medium text-green-700 mb-2">Extra Practice Days:</h5>
-                            <div className="flex flex-wrap gap-2">
+                            <h5 className="text-xs sm:text-sm font-medium text-green-700 mb-2">Extra Practice Days:</h5>
+                            <div className="flex flex-wrap gap-1.5 sm:gap-2">
                               {practiceDays.map((date) => (
                                 <span
                                   key={date}
-                                  className="inline-flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 rounded-lg text-sm"
+                                  className="inline-flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1 bg-green-100 text-green-700 rounded-lg text-[10px] sm:text-sm"
                                 >
                                   {new Date(date + 'T00:00:00').toLocaleDateString()}
                                   <button
@@ -1503,6 +1843,111 @@ export default function CoachDashboard() {
                 </div>
               </div>
               
+              {/* Quarter Management Section */}
+              <div className="border-t pt-4 sm:pt-6">
+                <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-3 sm:mb-4">Manage Quarters</h3>
+                <p className="text-gray-600 mb-3 sm:mb-4 text-xs sm:text-sm">Define quarter date ranges (Fall, Winter, Spring) to enable quarter-based attendance statistics for athletes.</p>
+                
+                {/* Add/Edit Quarter Form */}
+                <div className="border border-gray-200 rounded-lg p-3 sm:p-4 mb-4 bg-gray-50">
+                  <h4 className="font-medium text-gray-900 mb-3 text-sm sm:text-base">
+                    {editingQuarter ? 'Edit Quarter' : 'Add New Quarter'}
+                  </h4>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Quarter Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g., Fall, Winter, Spring"
+                        value={newQuarter.name}
+                        onChange={(e) => setNewQuarter({ ...newQuarter, name: e.target.value })}
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        Start Date
+                      </label>
+                      <input
+                        type="date"
+                        value={newQuarter.startDate}
+                        onChange={(e) => setNewQuarter({ ...newQuarter, startDate: e.target.value })}
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm text-gray-900"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
+                        End Date
+                      </label>
+                      <input
+                        type="date"
+                        value={newQuarter.endDate}
+                        onChange={(e) => setNewQuarter({ ...newQuarter, endDate: e.target.value })}
+                        className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-lg text-xs sm:text-sm text-gray-900"
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => {
+                        console.log('Button clicked!');
+                        saveQuarter();
+                      }}
+                      disabled={savingQuarter}
+                      className="px-3 sm:px-4 py-1.5 sm:py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 text-xs sm:text-sm"
+                    >
+                      {savingQuarter ? 'Saving...' : (editingQuarter ? 'Update Quarter' : 'Add Quarter')}
+                    </button>
+                    {editingQuarter && (
+                      <button
+                        onClick={cancelEditQuarter}
+                        className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors text-xs sm:text-sm"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                {/* List of Quarters */}
+                <div className="space-y-2">
+                  {quarters.length === 0 ? (
+                    <p className="text-gray-500 italic text-xs sm:text-sm">No quarters defined yet. Add your first quarter above.</p>
+                  ) : (
+                    quarters.map((quarter) => (
+                      <div key={quarter.id} className="border border-gray-200 rounded-lg p-3 sm:p-4 bg-white flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div className="flex-1">
+                          <h5 className="font-semibold text-gray-900 text-sm sm:text-base">{quarter.name}</h5>
+                          <p className="text-xs sm:text-sm text-gray-600">
+                            {new Date(quarter.start_date + 'T00:00:00').toLocaleDateString()} - {new Date(quarter.end_date + 'T00:00:00').toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => startEditQuarter(quarter)}
+                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition-colors text-xs sm:text-sm"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => deleteQuarter(quarter.id)}
+                            className="px-2 sm:px-3 py-1 sm:py-1.5 bg-red-500 text-white rounded hover:bg-red-600 transition-colors text-xs sm:text-sm"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+              
               <div className="mt-6 p-4 bg-blue-50 rounded-lg">
                 <h4 className="font-semibold text-blue-900 mb-2">How it works:</h4>
                 <ul className="text-sm text-blue-800 space-y-1">
@@ -1517,64 +1962,110 @@ export default function CoachDashboard() {
           </div>
         ) : (
           // Analytics Mode
-          <div className="analytics-print-area bg-white rounded-lg shadow-lg p-6">
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-900">
-                  UCSD Fencing Team - Attendance Report
+          <div className="analytics-print-area bg-white rounded-lg shadow-lg p-3 sm:p-6">
+            <div className="mb-4 sm:mb-6">
+              <div className="flex flex-col gap-3 mb-3 sm:mb-4">
+                <h2 className="text-base sm:text-xl font-bold text-gray-900">
+                  UCSD Fencing Team - {sessionType === 'practice' ? 'Practice' : 'Lift'} Attendance Report
                 </h2>
                 
-                <div className="print-controls flex items-center gap-4">
-                  <select
-                    value={selectedMonth}
-                    onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-                    className="px-3 py-2 border rounded text-gray-900"
-                  >
-                    {Array.from({ length: 12 }, (_, i) => (
-                      <option key={i} value={i}>
-                        {new Date(2025, i, 1).toLocaleDateString('en-US', { month: 'long' })}
-                      </option>
-                    ))}
-                  </select>
-                  
-                  <select
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                    className="px-3 py-2 border rounded text-gray-900"
-                  >
-                    <option value={2024}>2024</option>
-                    <option value={2025}>2025</option>
-                    <option value={2026}>2026</option>
-                  </select>
+                {/* View Mode Toggle */}
+                <div className="print-controls flex flex-wrap items-center gap-2">
+                  <span className="text-xs sm:text-sm text-gray-700 font-medium">View by:</span>
+                  <div className="flex bg-gray-100 rounded-md overflow-hidden border border-gray-300">
+                    <button
+                      onClick={() => setAnalyticsViewMode('month')}
+                      className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${
+                        analyticsViewMode === 'month' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'
+                      }`}
+                    >
+                      Month
+                    </button>
+                    <button
+                      onClick={() => setAnalyticsViewMode('quarter')}
+                      className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${
+                        analyticsViewMode === 'quarter' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'
+                      }`}
+                    >
+                      Quarter
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="print-controls flex flex-wrap items-center gap-2 sm:gap-4">
+                  {analyticsViewMode === 'month' ? (
+                    <>
+                      <select
+                        value={selectedMonth}
+                        onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                        className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base flex-1 sm:flex-none"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => (
+                          <option key={i} value={i}>
+                            {new Date(2025, i, 1).toLocaleDateString('en-US', { month: 'long' })}
+                          </option>
+                        ))}
+                      </select>
+                      
+                      <select
+                        value={selectedYear}
+                        onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                        className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base flex-1 sm:flex-none"
+                      >
+                        <option value={2024}>2024</option>
+                        <option value={2025}>2025</option>
+                        <option value={2026}>2026</option>
+                      </select>
+                    </>
+                  ) : (
+                    <select
+                      value={selectedAnalyticsQuarter || ''}
+                      onChange={(e) => setSelectedAnalyticsQuarter(e.target.value)}
+                      className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base flex-1"
+                    >
+                      <option value="">Select a quarter</option>
+                      {quarters.map((quarter) => (
+                        <option key={quarter.id} value={quarter.id}>
+                          {quarter.name} ({new Date(quarter.start_date + 'T00:00:00').toLocaleDateString()} - {new Date(quarter.end_date + 'T00:00:00').toLocaleDateString()})
+                        </option>
+                      ))}
+                    </select>
+                  )}
 
                   <button
                     onClick={handlePrint}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded transition-colors flex items-center gap-2"
+                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-green-600 hover:bg-green-700 text-white rounded transition-colors flex items-center gap-1 sm:gap-2 text-xs sm:text-base w-full sm:w-auto justify-center"
                   >
                     <span>🖨️</span>
-                    Print/PDF
+                    <span className="hidden sm:inline">Print/PDF</span>
+                    <span className="sm:hidden">Print</span>
                   </button>
                 </div>
               </div>
               
-              {/* Add month/year info for print */}
-              <div className="mb-4">
-                <h3 className="text-lg font-semibold text-gray-800">
-                  {new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} Attendance
+              {/* Add month/quarter info for print */}
+              <div className="mb-3 sm:mb-4">
+                <h3 className="text-sm sm:text-lg font-semibold text-gray-800">
+                  {analyticsViewMode === 'month' 
+                    ? `${new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} Attendance`
+                    : selectedAnalyticsQuarter 
+                      ? `${quarters.find(q => q.id === selectedAnalyticsQuarter)?.name || 'Quarter'} Attendance`
+                      : 'Select a Quarter'
+                  }
                 </h3>
               </div>
               
               {/* Legend */}
-              <div className="print-controls flex items-center gap-6 text-sm mb-6 p-4 bg-gray-100 rounded-lg border">
-                <span className="font-bold text-gray-900">Legend:</span>
-                <div className="flex gap-6">
-                  <span className="flex items-center gap-2 font-semibold"><span className="text-green-700 text-lg">✓</span> <span className="text-gray-800">On Time</span></span>
-                  <span className="flex items-center gap-2 font-semibold"><span className="text-yellow-700 text-lg">L</span> <span className="text-gray-800">Late</span></span>
-                  <span className="flex items-center gap-2 font-semibold"><span className="text-green-500 text-lg">J</span> <span className="text-gray-800">Late (Justified)</span></span>
-                  <span className="flex items-center gap-2 font-semibold"><span className="text-blue-700 text-lg">E</span> <span className="text-gray-800">Excused</span></span>
-                  <span className="flex items-center gap-2 font-semibold"><span className="text-red-700 text-lg">X</span> <span className="text-gray-800">Missing</span></span>
-                  <span className="flex items-center gap-2 font-semibold"><span className="bg-gray-200 px-2 py-1 rounded text-gray-600 text-xs">Empty</span> <span className="text-gray-800">No Practice</span></span>
-                  <span className="flex items-center gap-2 font-semibold"><span className="text-purple-700 text-lg">—</span> <span className="text-gray-800">Not Marked</span></span>
+              <div className="print-controls flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 text-[10px] sm:text-sm mb-4 sm:mb-6 p-2 sm:p-4 bg-gray-100 rounded-lg border">
+                <span className="font-bold text-gray-900 text-xs sm:text-sm">Legend:</span>
+                <div className="flex flex-wrap gap-2 sm:gap-6">
+                  <span className="flex items-center gap-1 font-semibold"><span className="text-green-700 text-sm sm:text-lg">✓</span> <span className="text-gray-800">On Time</span></span>
+                  <span className="flex items-center gap-1 font-semibold"><span className="text-yellow-700 text-sm sm:text-lg">L</span> <span className="text-gray-800">Late</span></span>
+                  <span className="flex items-center gap-1 font-semibold"><span className="text-green-500 text-sm sm:text-lg">J</span> <span className="text-gray-800">Late (J)</span></span>
+                  <span className="flex items-center gap-1 font-semibold"><span className="text-blue-700 text-sm sm:text-lg">E</span> <span className="text-gray-800">Excused</span></span>
+                  <span className="flex items-center gap-1 font-semibold"><span className="text-red-700 text-sm sm:text-lg">X</span> <span className="text-gray-800">Missing</span></span>
+                  <span className="flex items-center gap-1 font-semibold"><span className="bg-gray-200 px-1 sm:px-2 py-0.5 sm:py-1 rounded text-gray-600 text-[8px] sm:text-xs">Empty</span> <span className="text-gray-800">No Prac</span></span>
+                  <span className="flex items-center gap-1 font-semibold"><span className="text-purple-700 text-sm sm:text-lg">—</span> <span className="text-gray-800">Not Marked</span></span>
                 </div>
               </div>
             </div>
@@ -1584,15 +2075,15 @@ export default function CoachDashboard() {
               <table className="w-full border-collapse border border-gray-300">
                 <thead>
                   <tr className="bg-gray-100">
-                    <th className="border border-gray-300 px-3 py-2 text-left font-semibold text-gray-900 min-w-[150px]">
+                    <th className="border border-gray-300 px-1 sm:px-3 py-1 sm:py-2 text-left font-semibold text-gray-900 min-w-[80px] sm:min-w-[150px] text-[10px] sm:text-base">
                       Team Member
                     </th>
                     {getMonthDays().map((date, index) => (
-                      <th key={index} className="border border-gray-300 px-2 py-2 text-center font-semibold text-gray-900 min-w-[40px]">
-                        <div className="text-xs">
+                      <th key={index} className="border border-gray-300 px-1 sm:px-2 py-1 sm:py-2 text-center font-semibold text-gray-900 min-w-[25px] sm:min-w-[40px]">
+                        <div className="text-[8px] sm:text-xs">
                           {date.toLocaleDateString('en-US', { weekday: 'short' })}
                         </div>
-                        <div className="text-sm">
+                        <div className="text-[10px] sm:text-sm">
                           {date.getDate()}
                         </div>
                       </th>
@@ -1604,7 +2095,7 @@ export default function CoachDashboard() {
                     <Fragment key={squad.id}>
                       {/* Squad Header Row */}
                       <tr>
-                        <td colSpan={getMonthDays().length + 1} className="border border-gray-300 px-3 py-2 bg-blue-50 font-bold text-blue-900">
+                        <td colSpan={getMonthDays().length + 1} className="border border-gray-300 px-2 sm:px-3 py-1 sm:py-2 bg-blue-50 font-bold text-blue-900 text-xs sm:text-base">
                           {squad.displayName}
                         </td>
                       </tr>
@@ -1612,11 +2103,24 @@ export default function CoachDashboard() {
                       {/* Squad Members */}
                       {squad.members.map((member: any) => (
                         <tr key={member.id} className="hover:bg-gray-50">
-                          <td className="border border-gray-300 px-3 py-2 font-medium text-gray-900">
-                            <div className="flex items-center gap-2">
-                              {member.full_name}
+                          <td className="border border-gray-300 px-1 sm:px-3 py-1 sm:py-2 font-medium text-gray-900 text-[10px] sm:text-base">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
+                              <div className="flex items-center gap-1 sm:gap-2">
+                                <span>{member.full_name}</span>
+                                {analyticsViewMode === 'quarter' && selectedAnalyticsQuarter && (
+                                  <button
+                                    onClick={() => calculateAthleteQuarterStats(member.id, member.full_name)}
+                                    className="text-blue-600 hover:text-blue-800 transition-colors"
+                                    title="View quarter statistics"
+                                  >
+                                    <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                    </svg>
+                                  </button>
+                                )}
+                              </div>
                               {member.role === 'captain' && (
-                                <span className="text-xs bg-blue-100 text-blue-800 px-1 py-0.5 rounded">
+                                <span className="text-[8px] sm:text-xs bg-blue-100 text-blue-800 px-1 py-0.5 rounded">
                                   🔱
                                 </span>
                               )}
@@ -1625,15 +2129,28 @@ export default function CoachDashboard() {
                           
                           {getMonthDays().map((date, dateIndex) => {
                             const status = getAnalyticsAttendanceStatus(member.id, date);
+                            const notes = getAnalyticsAttendanceNotes(member.id, date);
                             const symbol = formatStatusSymbol(status);
                             const colorClass = getStatusColorClass(status);
                             
                             return (
                               <td 
                                 key={dateIndex} 
-                                className={`border border-gray-300 px-2 py-2 text-center font-bold ${colorClass}`}
+                                className={`border border-gray-300 px-1 sm:px-2 py-1 sm:py-2 text-center font-bold text-[10px] sm:text-base ${colorClass} relative group cursor-help`}
+                                title={notes || undefined}
                               >
-                                {symbol}
+                                <div className="relative inline-block">
+                                  {symbol}
+                                  {notes && (
+                                    <span className="absolute -top-1 -right-1 text-[8px]">📝</span>
+                                  )}
+                                </div>
+                                {notes && (
+                                  <div className="hidden group-hover:block absolute z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 -translate-y-full -mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap max-w-xs">
+                                    {notes}
+                                    <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+                                  </div>
+                                )}
                               </td>
                             );
                           })}
@@ -1653,20 +2170,25 @@ export default function CoachDashboard() {
             </div>
             
             {/* Summary Statistics */}
-            <div className="print-controls mt-6 p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-semibold text-gray-900 mb-2">
-                {new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} Summary
+            <div className="print-controls mt-4 sm:mt-6 p-2 sm:p-4 bg-gray-50 rounded-lg">
+              <h3 className="font-semibold text-gray-900 mb-2 text-sm sm:text-base">
+                {analyticsViewMode === 'quarter' 
+                  ? selectedAnalyticsQuarter 
+                    ? `${quarters.find(q => q.id === selectedAnalyticsQuarter)?.name || 'Quarter'} Summary`
+                    : 'Select a Quarter'
+                  : `${new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} Summary`
+                }
               </h3>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-4 text-[10px] sm:text-sm">
                 <div className="text-center">
-                  <div className="text-2xl font-bold text-green-600">
+                  <div className="text-lg sm:text-2xl font-bold text-green-600">
                     {(() => {
                       // Count on-time attendance for all days (including weekends)
                       let count = 0;
                       squads.forEach(squad => {
                         squad.members.forEach((member: any) => {
-                          weekDates.forEach(date => {
-                            const status = getAttendanceStatus(member.id, date);
+                          getMonthDays().forEach(date => {
+                            const status = getAnalyticsAttendanceStatus(member.id, date);
                             if (status === 'on-time') count++;
                           });
                         });
@@ -1683,8 +2205,8 @@ export default function CoachDashboard() {
                       let count = 0;
                       squads.forEach(squad => {
                         squad.members.forEach((member: any) => {
-                          weekDates.forEach(date => {
-                            const status = getAttendanceStatus(member.id, date);
+                          getMonthDays().forEach(date => {
+                            const status = getAnalyticsAttendanceStatus(member.id, date);
                             if (status === 'late-justified') count++;
                           });
                         });
@@ -1701,8 +2223,8 @@ export default function CoachDashboard() {
                       let count = 0;
                       squads.forEach(squad => {
                         squad.members.forEach((member: any) => {
-                          weekDates.forEach(date => {
-                            const status = getAttendanceStatus(member.id, date);
+                          getMonthDays().forEach(date => {
+                            const status = getAnalyticsAttendanceStatus(member.id, date);
                             if (status === 'late') count++;
                           });
                         });
@@ -1783,6 +2305,79 @@ export default function CoachDashboard() {
         )}
       </div>
       
+      {/* Athlete Quarter Stats Modal */}
+      {showAthleteStatsModal && selectedAthleteStats && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-4" onClick={() => setShowAthleteStatsModal(false)}>
+          <div className="bg-white rounded-lg p-4 max-w-sm w-full shadow-2xl border border-gray-300" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold text-gray-900">{selectedAthleteStats.name}</h3>
+              <button
+                onClick={() => setShowAthleteStatsModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="mb-3">
+              <h4 className="text-xs font-medium text-gray-600 mb-2">{selectedAthleteStats.quarterName}</h4>
+              
+              {/* Percentage Card */}
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3 mb-3">
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-blue-600 mb-1">{selectedAthleteStats.percentage}%</div>
+                  <div className="text-xs text-gray-600">Attendance Rate</div>
+                </div>
+                <div className="mt-2 bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div 
+                    className="bg-blue-600 h-full transition-all duration-300"
+                    style={{ width: `${selectedAthleteStats.percentage}%` }}
+                  ></div>
+                </div>
+              </div>
+              
+              {/* Stats Grid */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <div className="text-xl font-bold text-gray-900">{selectedAthleteStats.attended}</div>
+                  <div className="text-[10px] text-gray-600">Attended</div>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <div className="text-xl font-bold text-gray-900">{selectedAthleteStats.totalPractices}</div>
+                  <div className="text-[10px] text-gray-600">Total {sessionType === 'practice' ? 'Practices' : 'Lifts'}</div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-2">
+                  <div className="text-xl font-bold text-green-600">{selectedAthleteStats.onTime}</div>
+                  <div className="text-[10px] text-gray-600">On Time</div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-2">
+                  <div className="text-xl font-bold text-green-600">{selectedAthleteStats.lateJustified}</div>
+                  <div className="text-[10px] text-gray-600">Late (Justified)</div>
+                </div>
+                <div className="bg-yellow-50 rounded-lg p-2">
+                  <div className="text-xl font-bold text-yellow-600">{selectedAthleteStats.late}</div>
+                  <div className="text-[10px] text-gray-600">Late</div>
+                </div>
+                <div className="bg-blue-50 rounded-lg p-2">
+                  <div className="text-xl font-bold text-blue-600">{selectedAthleteStats.excused}</div>
+                  <div className="text-[10px] text-gray-600">Excused</div>
+                </div>
+                <div className="bg-red-50 rounded-lg p-2">
+                  <div className="text-xl font-bold text-red-600">{selectedAthleteStats.missing}</div>
+                  <div className="text-[10px] text-gray-600">Missing</div>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-2">
+                  <div className="text-xl font-bold text-gray-600">{selectedAthleteStats.notMarked}</div>
+                  <div className="text-[10px] text-gray-600">Not Marked</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Custom Days Modal */}
       {showCustomDaysModal && (
         <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">

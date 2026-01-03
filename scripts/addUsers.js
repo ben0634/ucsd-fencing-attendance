@@ -24,7 +24,7 @@ function generateUsername(firstName, lastName) {
 // Create a single user
 async function addUser(firstName, lastName, password, role, squadId, weapon = "foil", gender = "male") {
   const username = generateUsername(firstName, lastName);
-  const email = `${username}@ucsd-fencing.edu`; // Match createUsers email format
+  const email = `${username}@localhost`; // Match createUsers email format
 
   // Check if user exists
   const { data: existingUsers } = await supabase.auth.admin.listUsers();

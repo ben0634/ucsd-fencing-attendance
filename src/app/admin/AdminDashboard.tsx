@@ -70,7 +70,10 @@ export default function AdminDashboard() {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
       
-      if (!accessToken) return;
+      if (!accessToken) {
+        console.error('No access token available');
+        return;
+      }
 
       const response = await fetch('/api/users/list', {
         headers: {
@@ -101,9 +104,15 @@ export default function AdminDashboard() {
           return (a.username || '').localeCompare(b.username || '');
         });
         setUsers(sortedUsers);
+        console.log('Fetched users:', sortedUsers.length);
+      } else {
+        const errorData = await response.json();
+        console.error('Failed to fetch users:', response.status, errorData);
+        setMessage(`❌ Failed to load users: ${errorData.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('Error fetching users:', error);
+      setMessage('❌ Error loading users');
     }
   };
 
@@ -240,20 +249,20 @@ export default function AdminDashboard() {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-4 sm:p-8">
       {/* Header */}
-      <div className="max-w-7xl mx-auto mb-8">
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-6 text-white border border-white/20">
-          <div className="flex justify-between items-center">
+      <div className="max-w-7xl mx-auto mb-6 sm:mb-8">
+        <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-4 sm:p-6 text-white border border-white/20">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-yellow-300">Admin Dashboard</h1>
-              <p className="text-yellow-100 mt-1">
+              <h1 className="text-2xl sm:text-3xl font-bold text-yellow-300">Admin Dashboard</h1>
+              <p className="text-yellow-100 mt-1 text-sm sm:text-base">
                 Welcome, {user.user_metadata.firstName} {user.user_metadata.lastName}
               </p>
             </div>
             <button
               onClick={handleLogout}
-              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
+              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-md transition-transform transform hover:scale-105 w-full sm:w-auto"
             >
               Logout
             </button>
@@ -276,35 +285,35 @@ export default function AdminDashboard() {
 
       {/* User Management */}
       <div className="max-w-7xl mx-auto">
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
+        <div className="bg-white rounded-lg shadow-lg p-4 sm:p-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 sm:mb-6">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">User Management</h2>
             <button
               onClick={() => setShowAddUserModal(true)}
-              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105 w-full sm:w-auto text-sm sm:text-base"
             >
               + Add User
             </button>
           </div>
 
           {/* Users Table */}
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto -mx-4 sm:mx-0">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Name
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Username
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Role
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Squad
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
@@ -312,13 +321,13 @@ export default function AdminDashboard() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {users.map((userData) => (
                   <tr key={userData.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
                       {userData.firstName} {userData.lastName}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
                       {userData.username}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                         userData.role === 'coach' ? 'bg-purple-100 text-purple-800' :
                         userData.role === 'captain' ? 'bg-blue-100 text-blue-800' :
@@ -328,15 +337,15 @@ export default function AdminDashboard() {
                         {userData.role}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900">
                       {userData.squad}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                    <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm font-medium space-x-1 sm:space-x-2">
                       <button
                         onClick={() => handleResetPassword(userData.id, userData.username)}
                         className="text-blue-600 hover:text-blue-900 font-medium transition"
                       >
-                        Reset Password
+                        Reset
                       </button>
                       {userData.role !== 'admin' && (
                         <button
@@ -358,8 +367,8 @@ export default function AdminDashboard() {
       {/* Add User Modal */}
       {showAddUserModal && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-20 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Add New User</h3>
+          <div className="bg-white rounded-lg shadow-xl p-4 sm:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Add New User</h3>
             <form onSubmit={handleAddUser} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
@@ -436,17 +445,17 @@ export default function AdminDashboard() {
                   If left blank, a random password like "apple42" will be generated
                 </p>
               </div>
-              <div className="flex space-x-3 pt-4">
+              <div className="flex flex-col sm:flex-row gap-3 pt-4">
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105 text-sm sm:text-base"
                 >
                   Add User
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAddUserModal(false)}
-                  className="flex-1 px-4 py-2 bg-gray-400 hover:bg-gray-500 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
+                  className="flex-1 px-4 py-2 bg-gray-400 hover:bg-gray-500 text-white rounded-lg shadow-md transition-transform transform hover:scale-105 text-sm sm:text-base"
                 >
                   Cancel
                 </button>
@@ -459,8 +468,8 @@ export default function AdminDashboard() {
       {/* Reset Password Modal */}
       {showResetPasswordModal && resetPasswordUser && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-20 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Reset Password for {resetPasswordUser.username}</h3>
+          <div className="bg-white rounded-lg shadow-xl p-4 sm:p-6 max-w-md w-full">
+            <h3 className="text-lg sm:text-xl font-bold text-gray-900 mb-4">Reset Password for {resetPasswordUser.username}</h3>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -477,11 +486,11 @@ export default function AdminDashboard() {
                   If left blank, a random easy password like "apple42" will be generated
                 </p>
               </div>
-              <div className="flex space-x-3 pt-4">
+              <div className="flex flex-col sm:flex-row gap-3 pt-4">
                 <button
                   type="button"
                   onClick={handleResetPasswordSubmit}
-                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
+                  className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105 text-sm sm:text-base"
                 >
                   Reset Password
                 </button>
@@ -492,7 +501,7 @@ export default function AdminDashboard() {
                     setResetPasswordUser(null);
                     setCustomPassword('');
                   }}
-                  className="flex-1 px-4 py-2 bg-gray-400 hover:bg-gray-500 text-white rounded-lg shadow-md transition-transform transform hover:scale-105"
+                  className="flex-1 px-4 py-2 bg-gray-400 hover:bg-gray-500 text-white rounded-lg shadow-md transition-transform transform hover:scale-105 text-sm sm:text-base"
                 >
                   Cancel
                 </button>

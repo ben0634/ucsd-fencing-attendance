@@ -18,7 +18,8 @@ export async function POST(request: NextRequest) {
     // Get the authorization header
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization' }, { status: 401 });
+      console.error('Missing or invalid authorization header:', authHeader ? 'present but invalid format' : 'missing');
+      return NextResponse.json({ error: 'Missing or invalid authorization header' }, { status: 401 });
     }
 
     const token = authHeader.substring(7);
@@ -26,17 +27,24 @@ export async function POST(request: NextRequest) {
     // Verify the user's JWT token
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    if (authError) {
+      console.error('Auth error:', authError);
+      return NextResponse.json({ error: `Authentication failed: ${authError.message}` }, { status: 401 });
+    }
+    
+    if (!user) {
+      console.error('No user found from token');
+      return NextResponse.json({ error: 'User not found' }, { status: 401 });
     }
 
     // Check if user is a captain or coach
     if (!['captain', 'coach'].includes(user.user_metadata?.role)) {
-      return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+      console.error('Unauthorized role:', user.user_metadata?.role);
+      return NextResponse.json({ error: `Not authorized. Role: ${user.user_metadata?.role || 'none'}` }, { status: 403 });
     }
 
   // Get the request body
-  const { athleteId, date, status, sessionType: incomingSessionType } = await request.json();
+  const { athleteId, date, status, sessionType: incomingSessionType, notes } = await request.json();
   const sessionType = normalizeSessionType(incomingSessionType);
 
     // Validate required fields
@@ -96,14 +104,14 @@ export async function POST(request: NextRequest) {
       athleteData = athlete;
     }
 
-    // Parse and validate date
-    const attendanceDate = new Date(date);
-    if (isNaN(attendanceDate.getTime())) {
-      return NextResponse.json({ error: 'Invalid date format' }, { status: 400 });
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return NextResponse.json({ error: 'Invalid date format. Expected YYYY-MM-DD' }, { status: 400 });
     }
 
-    // Format date as YYYY-MM-DD
-    const formattedDate = attendanceDate.toISOString().split('T')[0];
+    // Use the date string directly (already in YYYY-MM-DD format)
+    const formattedDate = date;
 
     // Insert or update attendance record (now scoped by session_type)
     const { data: attendanceData, error: attendanceError } = await supabase
@@ -114,6 +122,7 @@ export async function POST(request: NextRequest) {
         status: status,
         marked_by: user.id,
         session_type: sessionType,
+        notes: notes || null,
         updated_at: new Date().toISOString()
       }, {
         onConflict: 'athlete_id,date,session_type'
@@ -170,7 +179,8 @@ export async function GET(request: NextRequest) {
     // Get the authorization header
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Missing authorization' }, { status: 401 });
+      console.error('GET: Missing or invalid authorization header');
+      return NextResponse.json({ error: 'Missing or invalid authorization header' }, { status: 401 });
     }
 
     const token = authHeader.substring(7);
@@ -178,8 +188,14 @@ export async function GET(request: NextRequest) {
     // Verify the user's JWT token
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    if (authError) {
+      console.error('GET: Auth error:', authError);
+      return NextResponse.json({ error: `Authentication failed: ${authError.message}` }, { status: 401 });
+    }
+    
+    if (!user) {
+      console.error('GET: No user found from token');
+      return NextResponse.json({ error: 'User not found' }, { status: 401 });
     }
 
     // Get query parameters

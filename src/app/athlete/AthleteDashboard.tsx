@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabaseClient";
+import PasswordChangeModal from "../../components/PasswordChangeModal";
 
 export default function AthleteDashboard() {
   const [user, setUser] = useState<User | null>(null);
@@ -20,6 +21,11 @@ export default function AthleteDashboard() {
   const [customPracticeDaysCache, setCustomPracticeDaysCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
   // sessionType allows switching between practice and lift attendance views
   const [sessionType, setSessionType] = useState<'practice' | 'lift'>('practice');
+  // Quarter management state
+  const [quarters, setQuarters] = useState<any[]>([]);
+  const [selectedQuarter, setSelectedQuarter] = useState<string | null>(null);
+  const [quarterStats, setQuarterStats] = useState<{attended: number, total: number, percentage: number} | null>(null);
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
   const router = useRouter();
 
   // Persist last used session type
@@ -37,6 +43,8 @@ export default function AthleteDashboard() {
   // Get current week's dates with offset
   const getWeekDates = () => {
     const today = new Date();
+    // Set to noon to avoid timezone issues near midnight
+    today.setHours(12, 0, 0, 0);
     // Add week offset (7 days per week)
     today.setDate(today.getDate() + (currentWeekOffset * 7));
     
@@ -163,6 +171,12 @@ export default function AthleteDashboard() {
     return record?.status || null;
   };
 
+  const getAttendanceNotes = (date: Date) => {
+    const dateString = getLocalDateString(date);
+    const record = attendanceData.find((a) => a.date === dateString);
+    return record?.notes || null;
+  };
+
   const hasPractice = (date: Date) => {
     if (!user) return true; // Default to showing practice if we don't know
 
@@ -198,6 +212,175 @@ export default function AthleteDashboard() {
     return squadSchedule.includes(dayName);
   };
 
+  // Fetch quarters for dropdown
+  const fetchQuarters = async () => {
+    try {
+      const { data: seasonData } = await supabase
+        .from('seasons')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const currentSeason = seasonData?.[0];
+      if (!currentSeason) return;
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      
+      if (!accessToken) return;
+
+      const response = await fetch(`/api/quarters?seasonId=${currentSeason.id}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const { quarters: allQuarters } = await response.json();
+        
+        // Show all quarters regardless of whether athlete has data
+        // If no data, stats will show 0%
+        setQuarters(allQuarters || []);
+        
+        // Auto-select current quarter
+        const today = new Date();
+        const currentQuarter = (allQuarters || []).find((q: any) => {
+          const start = new Date(q.start_date + 'T00:00:00');
+          const end = new Date(q.end_date + 'T00:00:00');
+          return today >= start && today <= end;
+        });
+        
+        if (currentQuarter) {
+          setSelectedQuarter(currentQuarter.id);
+        } else if (allQuarters && allQuarters.length > 0) {
+          // Select most recent quarter if no current quarter
+          setSelectedQuarter(allQuarters[allQuarters.length - 1].id);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching quarters:', error);
+    }
+  };
+
+  // Check if athlete has any attendance in quarter date range
+  const checkQuarterHasAttendance = async (quarter: any): Promise<boolean> => {
+    if (!user) return false;
+    
+    const startDate = quarter.start_date;
+    const endDate = quarter.end_date;
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    
+    if (!accessToken) return false;
+
+    const response = await fetch(
+      `/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (response.ok) {
+      const { attendance } = await response.json();
+      const athleteAttendance = attendance?.filter((a: any) => a.athlete_id === user.id) || [];
+      return athleteAttendance.length > 0;
+    }
+    
+    return false;
+  };
+
+  // Calculate quarter statistics
+  const calculateQuarterStats = async () => {
+    if (!selectedQuarter || !user) {
+      setQuarterStats(null);
+      return;
+    }
+
+    const quarter = quarters.find(q => q.id === selectedQuarter);
+    if (!quarter) {
+      setQuarterStats(null);
+      return;
+    }
+
+    const startDate = quarter.start_date;
+    const endDate = quarter.end_date;
+    const squadId = `${user.user_metadata?.gender}_${user.user_metadata?.weapon}`;
+
+    // Fetch attendance data for the entire quarter
+    const { data: sessionData } = await supabase.auth.getSession();
+    const accessToken = sessionData.session?.access_token;
+    
+    if (!accessToken) {
+      setQuarterStats(null);
+      return;
+    }
+
+    const response = await fetch(
+      `/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      setQuarterStats(null);
+      return;
+    }
+
+    const { attendance: quarterAttendanceData } = await response.json();
+    const athleteAttendance = quarterAttendanceData?.filter((a: any) => a.athlete_id === user.id) || [];
+
+    // Get all dates in quarter range, but only up to today
+    const start = new Date(startDate + 'T00:00:00');
+    const end = new Date(endDate + 'T00:00:00');
+    const today = new Date();
+    today.setHours(23, 59, 59, 999); // End of today
+    
+    // Only count practices up to today (not future practices)
+    const effectiveEnd = end < today ? end : today;
+    
+    let totalPractices = 0;
+    let attended = 0;
+
+    // Iterate through each day in the quarter up to today
+    for (let d = new Date(start); d <= effectiveEnd; d.setDate(d.getDate() + 1)) {
+      const currentDate = new Date(d);
+      
+      if (hasPractice(currentDate)) {
+        totalPractices++;
+        
+        const dateString = getLocalDateString(currentDate);
+        const attendance = athleteAttendance.find(
+          (a: any) => a.date === dateString
+        );
+        
+        // Count as attended if status is on-time, late, late-justified, or excused
+        if (attendance?.status === 'on-time' || 
+            attendance?.status === 'late' || 
+            attendance?.status === 'late-justified' ||
+            attendance?.status === 'excused') {
+          attended++;
+        }
+      }
+    }
+
+    const percentage = totalPractices > 0 ? Math.round((attended / totalPractices) * 100) : 0;
+    
+    setQuarterStats({
+      attended,
+      total: totalPractices,
+      percentage
+    });
+  };
+
   // Fetch attendance data when week changes
   useEffect(() => {
     if (user) {
@@ -218,7 +401,23 @@ export default function AthleteDashboard() {
     } else {
       fetchPracticeSchedules();
     }
+    // Refetch quarters when session type changes
+    fetchQuarters();
   }, [sessionType]);
+
+  // Fetch quarters on initial load
+  useEffect(() => {
+    if (user) {
+      fetchQuarters();
+    }
+  }, [user]);
+
+  // Calculate quarter stats when selection changes or attendance data updates
+  useEffect(() => {
+    if (selectedQuarter && practiceSchedules) {
+      calculateQuarterStats();
+    }
+  }, [selectedQuarter, currentWeekOffset, practiceSchedules, customNoPracticeDays, customPracticeDays, sessionType]);
 
   useEffect(() => {
     async function checkUser() {
@@ -229,6 +428,12 @@ export default function AthleteDashboard() {
       }
 
       setUser(data.user);
+      
+      // Check if user needs to change password
+      if (!data.user.user_metadata?.passwordChanged) {
+        setShowPasswordChange(true);
+      }
+      
       setLoading(false);
     }
 
@@ -243,33 +448,46 @@ export default function AthleteDashboard() {
   if (loading) return <p className="p-4">Loading...</p>;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-4 sm:p-6">
+      {showPasswordChange && user && (
+        <PasswordChangeModal
+          username={user.user_metadata?.username || user.email?.split('@')[0] || ''}
+          onPasswordChanged={() => {
+            setShowPasswordChange(false);
+            // Refresh user data
+            supabase.auth.getUser().then(({ data }) => {
+              if (data.user) setUser(data.user);
+            });
+          }}
+        />
+      )}
+      
       <div className="max-w-screen-lg mx-auto">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4 sm:mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-yellow-300 mb-1">
+            <h1 className="text-2xl sm:text-3xl font-bold text-yellow-300 mb-1 tracking-tight">
               Welcome, {user?.user_metadata?.firstName ? 
                 `${user.user_metadata.firstName} ${user.user_metadata.lastName}` :
                 user?.user_metadata?.username || user?.email?.split("@")[0]}!
             </h1>
-            <p className="text-yellow-100 text-base font-semibold">
+            <p className="text-yellow-100 text-sm sm:text-base font-semibold mt-1">
               Squad: {user?.user_metadata?.gender === 'male' ? "Men's" : user?.user_metadata?.gender === 'female' ? "Women's" : user?.user_metadata?.gender} {user?.user_metadata?.weapon?.charAt(0).toUpperCase() + user?.user_metadata?.weapon?.slice(1)}
             </p>
           </div>
-            <div className="flex items-center gap-3">
-            <div className="flex bg-white/10 rounded-lg overflow-hidden border border-white/20 backdrop-blur-sm">
+            <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+            <div className="flex bg-white/20 backdrop-blur-sm rounded-xl overflow-hidden border-2 border-white/30 shadow-lg flex-1 sm:flex-initial">
               <button
                 onClick={() => setSessionType('practice')}
-                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'practice' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+                className={`flex-1 sm:flex-initial px-4 py-2 text-sm sm:text-base font-semibold transition-all duration-200 ${sessionType === 'practice' ? 'bg-white text-emerald-600 shadow-md' : 'text-white hover:bg-white/10'}`}
               >Practice</button>
               <button
                 onClick={() => setSessionType('lift')}
-                className={`px-3 py-1 text-sm font-medium transition ${sessionType === 'lift' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
+                className={`flex-1 sm:flex-initial px-4 py-2 text-sm sm:text-base font-semibold transition-all duration-200 ${sessionType === 'lift' ? 'bg-white text-emerald-600 shadow-md' : 'text-white hover:bg-white/10'}`}
               >Lift</button>
             </div>
             <button
               onClick={handleLogout}
-              className="px-3 py-1 bg-red-500 text-white rounded"
+              className="px-3 py-1 bg-red-500 text-white rounded text-xs sm:text-sm"
             >
               Logout
             </button>
@@ -279,46 +497,46 @@ export default function AthleteDashboard() {
         {/* Modern Weekly Attendance Calendar */}
         <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-white/20 overflow-hidden">
           {/* Calendar Header */}
-          <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
+          <div className="bg-gradient-to-r from-blue-700 to-blue-800 px-3 sm:px-6 py-3 sm:py-4 shadow-md">
             <div className="flex items-center justify-between mb-2">
               <button
                 onClick={goToPreviousWeek}
-                className="flex items-center gap-2 px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm"
+                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm text-xs sm:text-sm"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
-                Previous
+                <span className="hidden sm:inline">Previous</span>
               </button>
               
-              <div className="text-center">
-                <h2 className="text-xl font-bold text-white">
+              <div className="text-center flex-1">
+                <h2 className="text-sm sm:text-xl font-bold text-white">
                   {currentWeekOffset === 0 ? "This Week's" : 
                    currentWeekOffset === -1 ? "Last Week's" :
                    currentWeekOffset === 1 ? "Next Week's" :
                    currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
-                   `${currentWeekOffset} Weeks Ahead`} {sessionType === 'practice' ? 'Practice' : 'Lift'} Attendance
+                   `${currentWeekOffset} Weeks Ahead`} {sessionType === 'practice' ? 'Practice' : 'Lift'}
                 </h2>
-                <p className="text-blue-100 text-sm font-medium">
+                <p className="text-blue-100 text-xs sm:text-sm font-medium">
                   {formatWeekRange(weekDates)}
                 </p>
               </div>
               
-              <div className="flex gap-2">
+              <div className="flex gap-1 sm:gap-2">
                 {currentWeekOffset !== 0 && (
                   <button
                     onClick={goToCurrentWeek}
-                    className="px-3 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 text-sm backdrop-blur-sm"
+                    className="px-2 sm:px-3 py-1.5 sm:py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 text-xs sm:text-sm backdrop-blur-sm"
                   >
                     Today
                   </button>
                 )}
                 <button
                   onClick={goToNextWeek}
-                  className="flex items-center gap-2 px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm"
+                  className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm text-xs sm:text-sm"
                 >
-                  Next
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <span className="hidden sm:inline">Next</span>
+                  <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
@@ -327,8 +545,8 @@ export default function AthleteDashboard() {
           </div>
 
           {/* Calendar Grid */}
-          <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
+          <div className="p-3 sm:p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-3 sm:gap-4">
               {dayNames.map((dayName, index) => {
                 const currentDate = weekDates[index];
                 const status = getAttendanceStatus(currentDate);
@@ -338,20 +556,69 @@ export default function AthleteDashboard() {
                 return (
                   <div
                     key={dayName}
-                    className={`relative p-4 rounded-xl border-2 transition-all duration-200 hover:scale-105 ${
+                    className={`${!hasScheduledPractice ? 'hidden sm:block' : ''} relative p-2 sm:p-3 rounded-lg sm:rounded-xl border sm:border-2 transition-all duration-200 ${
                       isToday 
                         ? 'border-yellow-400 bg-gradient-to-br from-yellow-50 to-yellow-100 shadow-lg' 
                         : 'border-gray-200 bg-gradient-to-br from-gray-50 to-white hover:border-blue-300 hover:shadow-md'
                     }`}
                   >
+                    {/* Mobile compact view */}
+                    <div className="sm:hidden text-center">
+                      <div className={`text-xs font-semibold ${isToday ? 'text-yellow-700' : 'text-gray-600'}`}>
+                        {dayName.substring(0, 3)}
+                      </div>
+                      <div className={`text-lg font-bold ${isToday ? 'text-yellow-800' : 'text-gray-800'}`}>
+                        {currentDate.getDate()}
+                      </div>
+                      {/* Status with text label */}
+                      <div className="mt-1.5 flex flex-col items-center gap-0.5">
+                        {!hasScheduledPractice ? (
+                          <>
+                            <div className="w-4 h-4 rounded-full bg-gray-200 flex items-center justify-center">
+                              <span className="text-xs text-gray-500">-</span>
+                            </div>
+                            <span className="text-[10px] text-gray-500">No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
+                          </>
+                        ) : status ? (
+                          <>
+                            <div className={`w-4 h-4 rounded-full ${
+                              status === 'on-time' || status === 'late-justified' ? 'bg-green-500' :
+                              status === 'late' ? 'bg-yellow-500' :
+                              status === 'excused' ? 'bg-blue-500' :
+                              'bg-red-500'
+                            }`}></div>
+                            <span className={`text-[10px] font-medium ${
+                              status === 'on-time' || status === 'late-justified' ? 'text-green-700' :
+                              status === 'late' ? 'text-yellow-700' :
+                              status === 'excused' ? 'text-blue-700' :
+                              'text-red-700'
+                            }`}>
+                              {status === 'on-time' ? 'On Time' :
+                               status === 'late' ? 'Late' :
+                               status === 'late-justified' ? 'Late (J)' :
+                               status === 'excused' ? 'Excused' :
+                               'Missing'}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-4 h-4 rounded-full bg-gray-300"></div>
+                            <span className="text-[10px] text-gray-500">Not Marked</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Desktop full view */}
+                    <div className="hidden sm:block">
                     {/* Day Header */}
-                    <div className="text-center mb-3">
-                      <div className={`text-sm font-semibold uppercase tracking-wide ${
+                    <div className="text-center mb-2 sm:mb-3">
+                      <div className={`text-xs sm:text-sm font-semibold uppercase tracking-wide ${
                         isToday ? 'text-yellow-700' : 'text-gray-600'
                       }`}>
                         {dayName}
                       </div>
-                      <div className={`text-2xl font-bold ${
+                      <div className={`text-xl sm:text-2xl font-bold ${
                         isToday ? 'text-yellow-800' : 'text-gray-800'
                       }`}>
                         {currentDate.getDate()}
@@ -414,6 +681,17 @@ export default function AthleteDashboard() {
                              status === 'excused' ? 'Excused' :
                              'Missing'}
                           </span>
+                          {(() => {
+                            const notes = getAttendanceNotes(currentDate);
+                            if (notes) {
+                              return (
+                                <div className="mt-2 text-xs text-gray-800 bg-gradient-to-r from-yellow-50 to-amber-50 border-2 border-yellow-200 rounded-lg px-3 py-2 max-w-full break-words shadow-sm" title={notes}>
+                                  <span className="font-semibold">📝 Note:</span> {notes.length > 50 ? notes.substring(0, 50) + '...' : notes}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       ) : (
                         <div className="flex flex-col items-center gap-2">
@@ -426,10 +704,11 @@ export default function AthleteDashboard() {
                         </div>
                       )}
                     </div>
+                    </div>
 
                     {/* Today indicator */}
                     {isToday && (
-                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full border-2 border-white"></div>
+                      <div className="absolute -top-1 -right-1 w-2 h-2 sm:w-3 sm:h-3 bg-yellow-400 rounded-full border-2 border-white"></div>
                     )}
                   </div>
                 );
@@ -437,9 +716,9 @@ export default function AthleteDashboard() {
             </div>
           </div>
 
-          {/* Legend */}
-          <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
-            <div className="flex flex-wrap items-center justify-center gap-6 text-sm">
+          {/* Legend - hide on mobile */}
+          <div className="hidden sm:block bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-200">
+            <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-6 text-xs sm:text-sm">
               {/* Removed mode badge per request */}
               <div className="flex items-center gap-2">
                 <div className="w-4 h-4 rounded-full bg-green-100 flex items-center justify-center">
@@ -544,6 +823,84 @@ export default function AthleteDashboard() {
               );
             })()}
           </div>
+
+          {/* Quarter Statistics Section */}
+          {quarters.length > 0 && (
+            <div className="mt-6 border-t pt-6">
+              <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                  <h3 className="text-lg sm:text-xl font-bold text-gray-900">
+                    Quarter Statistics
+                  </h3>
+                  <select
+                    value={selectedQuarter || ''}
+                    onChange={(e) => setSelectedQuarter(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm sm:text-base text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    {quarters.map((quarter) => (
+                      <option key={quarter.id} value={quarter.id}>
+                        {quarter.name} ({new Date(quarter.start_date + 'T00:00:00').toLocaleDateString()} - {new Date(quarter.end_date + 'T00:00:00').toLocaleDateString()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedQuarter && quarterStats && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-4 text-center">
+                        <div className="text-3xl sm:text-4xl font-bold text-blue-700">
+                          {quarterStats.percentage}%
+                        </div>
+                        <div className="text-sm text-blue-600 mt-1">Attendance Rate</div>
+                      </div>
+                      
+                      <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-4 text-center">
+                        <div className="text-3xl sm:text-4xl font-bold text-green-700">
+                          {quarterStats.attended}
+                        </div>
+                        <div className="text-sm text-green-600 mt-1">{sessionType === 'practice' ? 'Practices' : 'Lifts'} Attended</div>
+                      </div>
+                      
+                      <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg p-4 text-center">
+                        <div className="text-3xl sm:text-4xl font-bold text-purple-700">
+                          {quarterStats.total}
+                        </div>
+                        <div className="text-sm text-purple-600 mt-1">Total {sessionType === 'practice' ? 'Practices' : 'Lifts'}</div>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-gray-600">Progress</span>
+                        <span className="text-sm font-semibold text-gray-900">
+                          {quarterStats.attended} / {quarterStats.total}
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-3">
+                        <div
+                          className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-500"
+                          style={{ width: `${quarterStats.percentage}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {selectedQuarter && !quarterStats && (
+                  <div className="text-center py-8 text-gray-500">
+                    Calculating quarter statistics...
+                  </div>
+                )}
+
+                {!selectedQuarter && (
+                  <div className="text-center py-8 text-gray-500">
+                    Select a quarter to view statistics
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

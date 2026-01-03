@@ -50,7 +50,7 @@ export default function LoginPage() {
     e.preventDefault();
 
     const { data: { session }, error } = await supabase.auth.signInWithPassword({
-      email: username + "@ucsd-fencing.edu", // match the email format from createUsers
+      email: username + "@localhost", // match the email format from createUsers
       password,
     });
 

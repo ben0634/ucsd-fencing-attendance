@@ -14,15 +14,15 @@ const supabase = createClient(
 // Path to your CSV file
 const csvFilePath = "./team.csv";
 
-// Function to generate username: first initial + last name, with collision handling
+// Function to generate username: first name + last initial, with collision handling
 const generateUsername = (firstName, lastName, existingUsernames) => {
-  let username = `${firstName[0].toLowerCase()}${lastName.toLowerCase()}`;
+  let username = `${firstName.toLowerCase()}${lastName[0].toLowerCase()}`;
   let counter = 1;
   
   // Handle collisions by adding a number suffix
   while (existingUsernames.has(username)) {
     counter++;
-    username = `${firstName[0].toLowerCase()}${lastName.toLowerCase()}${counter}`;
+    username = `${firstName.toLowerCase()}${lastName[0].toLowerCase()}${counter}`;
   }
   
   existingUsernames.add(username);
@@ -55,7 +55,7 @@ const createUsers = async () => {
       record;
 
     const username = generateUsername(firstName, lastName, existingUsernames);
-    const email = `${username}@ucsd-fencing.edu`;
+    const email = `${username}@localhost`;
 
     // Skip if user already exists
     if (existingUsers && existingUsers.users.find(u => u.email === email)) {
