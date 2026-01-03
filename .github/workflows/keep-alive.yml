@@ -11,7 +11,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping deployment to keep Supabase active
+        id: ping
         run: |
           echo "Pinging deployment to prevent Supabase from pausing..."
-          curl -f https://ucsd-fencing-attendance-git-main-ben0634s-projects.vercel.app/ || echo "Ping failed but continuing..."
-          echo "Ping completed successfully!"
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://ucsd-fencing-attendance-git-main-ben0634s-projects.vercel.app/)
+          echo "HTTP Status: $RESPONSE"
+          if [ "$RESPONSE" = "200" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "Ping completed successfully!"
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "Ping failed with status $RESPONSE"
+          fi
+      
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "UCSD Fencing - Weekly Keep-Alive Ping ${{ steps.ping.outputs.status == 'success' && '✅' || '❌' }}"
+          to: benkim0634@gmail.com
+          from: UCSD Fencing Bot
+          body: |
+            Weekly keep-alive ping completed.
+            
+            Status: ${{ steps.ping.outputs.status }}
+            Time: ${{ github.event.repository.updated_at }}
+            
+            Your Supabase database remains active!
