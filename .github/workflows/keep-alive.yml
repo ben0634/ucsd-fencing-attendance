@@ -1,0 +1,17 @@
+name: Keep Supabase Active
+
+on:
+  schedule:
+    # Run every Monday at 12:00 PM UTC (4 AM PST / 5 AM PDT)
+    - cron: '0 12 * * 1'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping deployment to keep Supabase active
+        run: |
+          echo "Pinging deployment to prevent Supabase from pausing..."
+          curl -f https://ucsd-fencing-attendance-git-main-ben0634s-projects.vercel.app/ || echo "Ping failed but continuing..."
+          echo "Ping completed successfully!"
