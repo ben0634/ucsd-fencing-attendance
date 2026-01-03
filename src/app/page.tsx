@@ -40,6 +40,7 @@ export default function LoginPage() {
     if (role === "athlete") router.push("/athlete");
     else if (role === "coach") router.push("/coach");
     else if (role === "captain") router.push("/captain");
+    else if (role === "admin") router.push("/admin");
     else router.push("/"); // fallback
   };
 
