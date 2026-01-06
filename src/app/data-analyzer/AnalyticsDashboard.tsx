@@ -611,6 +611,11 @@ export default function AnalyticsDashboard() {
     return athleteStats
       .filter(a => a.total > 0)
       .sort((a, b) => {
+        // Handle null rates (push to end)
+        if (a.rate === null && b.rate === null) return 0;
+        if (a.rate === null) return 1;
+        if (b.rate === null) return -1;
+        
         // First sort by rate (highest first)
         if (b.rate !== a.rate) return b.rate - a.rate;
         // If rates are equal, sort by total attended (highest first)
