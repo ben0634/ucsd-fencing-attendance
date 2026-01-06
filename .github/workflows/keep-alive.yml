@@ -14,7 +14,7 @@ jobs:
         id: ping
         run: |
           echo "Pinging deployment to prevent Supabase from pausing..."
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://ucsd-fencing-attendance-git-main-ben0634s-projects.vercel.app/)
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://ucsdfencing.vercel.app/)
           echo "HTTP Status: $RESPONSE"
           if [ "$RESPONSE" = "200" ]; then
             echo "status=success" >> $GITHUB_OUTPUT
@@ -25,6 +25,7 @@ jobs:
           fi
       
       - name: Send email notification
+        continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
