@@ -400,6 +400,7 @@ export default function AdminDashboard() {
                   <option value="athlete">Athlete</option>
                   <option value="captain">Captain</option>
                   <option value="coach">Coach</option>
+                  <option value="data-analyzer">Data Analyzer</option>
                   <option value="admin">Admin</option>
                 </select>
               </div>

@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
         squadId,
         weapon,
         gender,
+        passwordChanged: false, // Force password change on first login
       },
     });
 

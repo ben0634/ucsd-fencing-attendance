@@ -18,8 +18,13 @@ export async function GET(request: NextRequest) {
     
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     
-    if (authError || !user || user.user_metadata.role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized - Admin access required' }, { status: 403 });
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+    
+    // Check if user is admin, coach, or data-analyzer
+    if (!['admin', 'coach', 'data-analyzer'].includes(user.user_metadata?.role)) {
+      return NextResponse.json({ error: 'Unauthorized - Admin, Coach, or Data Analyzer access required' }, { status: 403 });
     }
 
     // Fetch all users
@@ -75,6 +80,7 @@ export async function GET(request: NextRequest) {
         username: metadata.username || '',
         firstName: metadata.firstName || '',
         lastName: metadata.lastName || '',
+        full_name: metadata.full_name || (metadata.firstName && metadata.lastName ? `${metadata.firstName} ${metadata.lastName}` : ''),
         role: metadata.role || '',
         squad: squad,
         weapon: metadata.weapon || 'N/A',

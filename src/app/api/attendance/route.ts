@@ -62,28 +62,26 @@ export async function POST(request: NextRequest) {
     let athleteData = null;
     
     if (user.user_metadata?.role === 'captain') {
-      // Captain validation - check squad membership
+      // Captain validation - check squad membership (weapon only, both genders)
       const captainWeapon = user.user_metadata?.weapon;
-      const captainGender = user.user_metadata?.gender;
 
-      if (!captainWeapon || !captainGender) {
-        return NextResponse.json({ error: 'Captain missing weapon or gender' }, { status: 400 });
+      if (!captainWeapon) {
+        return NextResponse.json({ error: 'Captain missing weapon' }, { status: 400 });
       }
 
-      // Check if the athlete exists and is in the same squad (or if captain is marking their own attendance)
+      // Check if the athlete exists and is in the same weapon (or if captain is marking their own attendance)
       const { data: athlete, error: athleteError } = await supabase
         .from('users')
         .select('*')
         .eq('id', athleteId)
         .eq('weapon', captainWeapon)
-        .eq('gender', captainGender)
         .in('role', ['athlete', 'captain']) // Allow both athletes and captains
         .single();
 
-      // If not found in same squad, check if captain is marking their own attendance
+      // If not found in same weapon, check if captain is marking their own attendance
       if (athleteError || !athlete) {
         if (athleteId !== user.id) {
-          return NextResponse.json({ error: 'Athlete not found or not in your squad' }, { status: 404 });
+          return NextResponse.json({ error: 'Athlete not found or not in your weapon group' }, { status: 404 });
         }
       } else {
         athleteData = athlete;
@@ -209,21 +207,19 @@ export async function GET(request: NextRequest) {
 
     // Filter based on user role
     if (user.user_metadata?.role === 'captain') {
-      // Captain can see their squad's attendance (including their own)
+      // Captain can see attendance for all athletes of their weapon (both genders)
       const weapon = user.user_metadata?.weapon;
-      const gender = user.user_metadata?.gender;
       
-      if (!weapon || !gender) {
-        return NextResponse.json({ error: 'Captain missing weapon or gender' }, { status: 400 });
+      if (!weapon) {
+        return NextResponse.json({ error: 'Captain missing weapon' }, { status: 400 });
       }
       
-      // Get athletes from the same squad (including captains)
+      // Get athletes from the same weapon (including captains, both genders)
       const { data: squadMembers, error: squadError } = await supabase
         .from('users')
         .select('id')
         .in('role', ['athlete', 'captain']) // Include both athletes and captains
-        .eq('weapon', weapon)
-        .eq('gender', gender);
+        .eq('weapon', weapon);
 
       if (squadError || !squadMembers) {
         console.error('Error fetching squad members:', squadError);
@@ -241,11 +237,11 @@ export async function GET(request: NextRequest) {
     } else if (user.user_metadata?.role === 'athlete') {
       // Athletes can only see their own attendance
       query = query.eq('athlete_id', user.id);
-    } else if (user.user_metadata?.role !== 'coach') {
-      // Only captains, athletes, and coaches can access attendance
+    } else if (!['coach', 'data-analyzer'].includes(user.user_metadata?.role)) {
+      // Only captains, athletes, coaches, and data-analyzers can access attendance
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
-    // Coaches can see all attendance (no additional filters)
+    // Coaches and data-analyzers can see all attendance (no additional filters)
 
     // Apply date filters
     if (startDate) {

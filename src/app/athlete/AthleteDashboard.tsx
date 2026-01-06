@@ -26,6 +26,8 @@ export default function AthleteDashboard() {
   const [selectedQuarter, setSelectedQuarter] = useState<string | null>(null);
   const [quarterStats, setQuarterStats] = useState<{attended: number, total: number, percentage: number} | null>(null);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth()); // 0-11
+  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
   const router = useRouter();
 
   // Persist last used session type
@@ -362,13 +364,14 @@ export default function AthleteDashboard() {
           (a: any) => a.date === dateString
         );
         
-        // Count as attended if status is on-time, late, late-justified, or excused
-        if (attendance?.status === 'on-time' || 
-            attendance?.status === 'late' || 
-            attendance?.status === 'late-justified' ||
-            attendance?.status === 'excused') {
+        // Count as attended if status is on-time or late-justified
+        // Excused absences are removed from denominator (don't count as practice to attend)
+        if (attendance?.status === 'excused') {
+          totalPractices--; // Remove from denominator
+        } else if (attendance?.status === 'on-time' || attendance?.status === 'late-justified') {
           attended++;
         }
+        // Late and missing don't count as attended but stay in denominator
       }
     }
 
@@ -443,6 +446,39 @@ export default function AthleteDashboard() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/");
+  };
+
+  // Calendar helper functions
+  const getDaysInMonth = (month: number, year: number) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+
+  const getFirstDayOfMonth = (month: number, year: number) => {
+    return new Date(year, month, 1).getDay(); // 0 = Sunday
+  };
+
+  const goToPreviousMonth = () => {
+    if (calendarMonth === 0) {
+      setCalendarMonth(11);
+      setCalendarYear(calendarYear - 1);
+    } else {
+      setCalendarMonth(calendarMonth - 1);
+    }
+  };
+
+  const goToNextMonth = () => {
+    if (calendarMonth === 11) {
+      setCalendarMonth(0);
+      setCalendarYear(calendarYear + 1);
+    } else {
+      setCalendarMonth(calendarMonth + 1);
+    }
+  };
+
+  const goToCurrentMonth = () => {
+    const today = new Date();
+    setCalendarMonth(today.getMonth());
+    setCalendarYear(today.getFullYear());
   };
 
   if (loading) return <p className="p-4">Loading...</p>;
@@ -822,6 +858,171 @@ export default function AthleteDashboard() {
                 </div>
               );
             })()}
+          </div>
+
+          {/* Attendance Calendar Heatmap */}
+          <div className="mt-6 mb-4 px-3 sm:px-6">
+            <div className="bg-white rounded-xl shadow border border-gray-200 p-3 sm:p-4">
+              <div className="flex flex-col sm:flex-row items-center justify-between mb-3 gap-2">
+                <h3 className="text-base sm:text-lg font-bold text-gray-800">Attendance Calendar</h3>
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <button
+                    onClick={goToPreviousMonth}
+                    className="p-1 hover:bg-gray-100 rounded transition-colors"
+                    title="Previous month"
+                  >
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <div className="text-center min-w-[140px] sm:min-w-[160px]">
+                    <span className="text-sm sm:text-base font-bold text-gray-800">
+                      {new Date(calendarYear, calendarMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                    </span>
+                  </div>
+                  <button
+                    onClick={goToNextMonth}
+                    className="p-1 hover:bg-gray-100 rounded transition-colors"
+                    title="Next month"
+                  >
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={goToCurrentMonth}
+                    className="px-2 py-1 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-100 rounded transition-colors ml-1"
+                  >
+                    Today
+                  </button>
+                </div>
+              </div>
+
+              {/* Calendar Grid */}
+              <div className="grid grid-cols-7 gap-1">
+                {/* Day headers */}
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                  <div key={day} className="text-center text-[10px] sm:text-xs font-semibold text-gray-600 py-1">
+                    <span className="hidden sm:inline">{day}</span>
+                    <span className="sm:hidden">{day.charAt(0)}</span>
+                  </div>
+                ))}
+                
+                {/* Calendar days */}
+                {(() => {
+                  const daysInMonth = getDaysInMonth(calendarMonth, calendarYear);
+                  const firstDay = getFirstDayOfMonth(calendarMonth, calendarYear);
+                  const today = new Date();
+                  const days = [];
+                  
+                  // Empty cells before first day
+                  for (let i = 0; i < firstDay; i++) {
+                    days.push(<div key={`empty-${i}`} className="aspect-square"></div>);
+                  }
+                  
+                  // Calendar days
+                  for (let day = 1; day <= daysInMonth; day++) {
+                    const date = new Date(calendarYear, calendarMonth, day);
+                    const dateString = getLocalDateString(date);
+                    const isToday = date.toDateString() === today.toDateString();
+                    const hasScheduledPractice = hasPractice(date);
+                    const status = getAttendanceStatus(date);
+                    const notes = getAttendanceNotes(date);
+                    
+                    // Determine background color with better contrast
+                    let bgColor = 'bg-white';
+                    let borderColor = 'border-gray-300';
+                    let borderStyle = '';
+                    let textColor = 'text-gray-800';
+                    
+                    if (!hasScheduledPractice) {
+                      bgColor = 'bg-gray-200';
+                      textColor = 'text-gray-500';
+                      borderColor = 'border-gray-300';
+                    } else if (status === 'on-time' || status === 'late-justified') {
+                      bgColor = 'bg-green-100 hover:bg-green-200';
+                      borderColor = 'border-green-400';
+                      textColor = 'text-green-800';
+                    } else if (status === 'late') {
+                      bgColor = 'bg-yellow-100 hover:bg-yellow-200';
+                      borderColor = 'border-yellow-400';
+                      textColor = 'text-yellow-800';
+                    } else if (status === 'excused') {
+                      bgColor = 'bg-blue-100 hover:bg-blue-200';
+                      borderColor = 'border-blue-400';
+                      textColor = 'text-blue-800';
+                    } else if (status === 'missing') {
+                      bgColor = 'bg-red-100 hover:bg-red-200';
+                      borderColor = 'border-red-400';
+                      textColor = 'text-red-800';
+                    } else {
+                      // Not marked - use dashed border for distinction
+                      bgColor = 'bg-white hover:bg-gray-50';
+                      borderColor = 'border-gray-300';
+                      borderStyle = 'border-dashed';
+                    }
+                    
+                    if (isToday) {
+                      borderColor = 'border-yellow-500';
+                      borderStyle = 'border-2';
+                    }
+                    
+                    days.push(
+                      <div
+                        key={day}
+                        className={`aspect-square border ${borderColor} ${borderStyle} ${bgColor} rounded flex flex-col items-center justify-center transition-all cursor-pointer relative`}
+                        title={`${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${!hasScheduledPractice ? ' - No practice' : status ? ` - ${status}` : ' - Not marked'}${notes ? `\nNote: ${notes}` : ''}`}
+                      >
+                        <span className={`text-[10px] sm:text-xs font-semibold ${textColor}`}>{day}</span>
+                        {status && hasScheduledPractice && (
+                          <div className={`w-1 h-1 rounded-full mt-0.5 ${
+                            status === 'on-time' || status === 'late-justified' ? 'bg-green-600' :
+                            status === 'late' ? 'bg-yellow-600' :
+                            status === 'excused' ? 'bg-blue-600' :
+                            'bg-red-600'
+                          }`}></div>
+                        )}
+                        {notes && (
+                          <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-yellow-400 rounded-full border border-white"></div>
+                        )}
+                      </div>
+                    );
+                  }
+                  
+                  return days;
+                })()}
+              </div>
+
+              {/* Calendar Legend */}
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-green-100 border border-green-400"></div>
+                    <span className="text-gray-700">On Time</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-yellow-100 border border-yellow-400"></div>
+                    <span className="text-gray-700">Late</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-blue-100 border border-blue-400"></div>
+                    <span className="text-gray-700">Excused</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-red-100 border border-red-400"></div>
+                    <span className="text-gray-700">Missing</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-gray-200 border border-gray-300"></div>
+                    <span className="text-gray-700">No Practice</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-white border border-dashed border-gray-300"></div>
+                    <span className="text-gray-700">Not Marked</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Quarter Statistics Section */}

@@ -43,6 +43,7 @@ export default function LoginPage() {
     else if (role === "coach") router.push("/coach");
     else if (role === "captain") router.push("/captain");
     else if (role === "admin") router.push("/admin");
+    else if (role === "data-analyzer") router.push("/data-analyzer");
     else router.push("/"); // fallback
   };
 

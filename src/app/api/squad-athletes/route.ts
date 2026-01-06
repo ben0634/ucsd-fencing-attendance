@@ -27,21 +27,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
-    // Get captain's weapon and gender from metadata
+    // Get captain's weapon from metadata
     const weapon = user.user_metadata?.weapon;
-    const gender = user.user_metadata?.gender;
 
-    if (!weapon || !gender) {
-      return NextResponse.json({ error: 'Captain missing weapon or gender' }, { status: 400 });
+    if (!weapon) {
+      return NextResponse.json({ error: 'Captain missing weapon' }, { status: 400 });
     }
 
-    // Fetch all squad members (athletes + captain) from the same squad using service role
+    // Fetch all squad members (athletes + captain) from the same weapon, both genders
+    // This allows captains to view/manage both men's and women's groups for their weapon
     const { data: squadMembers, error } = await supabase
       .from('users')
       .select('*')
       .in('role', ['athlete', 'captain'])
       .eq('weapon', weapon)
-      .eq('gender', gender)
+      .order('gender', { ascending: true }) // Group by gender (men first, then women)
       .order('role', { ascending: true }) // Show athletes first, then captain
       .order('full_name', { ascending: true });
 

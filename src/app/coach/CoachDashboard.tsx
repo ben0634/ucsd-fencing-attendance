@@ -922,8 +922,11 @@ export default function CoachDashboard() {
       }
     });
     
-    const attended = onTime + late + lateJustified + excused;
-    const percentage = totalPractices > 0 ? Math.round((attended / totalPractices) * 100) : 0;
+    // Attended = on-time + late-justified
+    // Total eligible = total practices - excused
+    const attended = onTime + lateJustified;
+    const totalEligible = totalPractices - excused;
+    const percentage = totalEligible > 0 ? Math.round((attended / totalEligible) * 100) : 0;
     
     setSelectedAthleteStats({
       name: memberName,
