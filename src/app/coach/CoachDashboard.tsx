@@ -32,6 +32,7 @@ export default function CoachDashboard() {
   const [selectedCustomSquad, setSelectedCustomSquad] = useState<string>('all');
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
   const [customSpecificDates, setCustomSpecificDates] = useState<string[]>(['']);
+  const [selectedPracticeQuarterScope, setSelectedPracticeQuarterScope] = useState<string>('global');
   // sessionType toggle for Practice vs Lift modes
   const [sessionType, setSessionType] = useState<'practice' | 'lift'>('practice');
   // Quarter management state
@@ -45,22 +46,36 @@ export default function CoachDashboard() {
   // Athlete quarter stats modal state
   const [showAthleteStatsModal, setShowAthleteStatsModal] = useState(false);
   const [selectedAthleteStats, setSelectedAthleteStats] = useState<any>(null);
+  const [quarterFinalReport, setQuarterFinalReport] = useState<any | null>(null);
+  const [loadingQuarterFinalReport, setLoadingQuarterFinalReport] = useState(false);
+  const [quarterReportSortKey, setQuarterReportSortKey] = useState<'name' | 'squad' | 'overallPercentage' | 'overallCoveragePercentage' | 'overallAttended' | 'overallScheduled'>('overallPercentage');
+  const [quarterReportSortDirection, setQuarterReportSortDirection] = useState<'asc' | 'desc'>('desc');
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const router = useRouter();
 
-  // When sessionType toggles, attempt to restore cached schedules; otherwise fetch
+  const getCurrentQuarterId = () => {
+    const today = new Date();
+    const currentQuarter = quarters.find((q: any) => {
+      const start = new Date(q.start_date + 'T00:00:00');
+      const end = new Date(q.end_date + 'T00:00:00');
+      return today >= start && today <= end;
+    });
+    return currentQuarter?.id || null;
+  };
+
+  // When sessionType toggles, refresh schedules for selected quarter scope
   useEffect(() => {
-    // Skip initial before user load
     if (!user) return;
-    const cached = practiceScheduleCache[sessionType];
-    if (Object.keys(cached).length > 0) {
-      setPracticeSchedules(cached);
-      setCustomNoPracticeDays(customNoPracticeDaysCache[sessionType]);
-      setCustomPracticeDays(customPracticeDaysCache[sessionType]);
-    } else {
-      fetchPracticeSchedules();
+    fetchPracticeSchedules();
+  }, [sessionType, selectedPracticeQuarterScope, user]);
+
+  useEffect(() => {
+    if (!quarters.length) return;
+    const currentQuarterId = getCurrentQuarterId();
+    if (selectedPracticeQuarterScope === 'global' && currentQuarterId) {
+      setSelectedPracticeQuarterScope(currentQuarterId);
     }
-  }, [sessionType]);
+  }, [quarters]);
 
   // Get current week's dates with offset
   const getWeekDates = () => {
@@ -630,7 +645,11 @@ export default function CoachDashboard() {
         console.error('No access token for fetching schedules');
         return;
       }
-      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}`, {
+      const quarterParam = selectedPracticeQuarterScope !== 'global'
+        ? `&quarterId=${encodeURIComponent(selectedPracticeQuarterScope)}`
+        : '';
+
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}${quarterParam}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -686,6 +705,7 @@ export default function CoachDashboard() {
           practiceDays,
           customNoPracticeDays: customNoPracticeDays[squadId] || [],
           customPracticeDays: customPracticeDays[squadId] || [],
+          quarterId: selectedPracticeQuarterScope === 'global' ? null : selectedPracticeQuarterScope,
           sessionType
         })
       });
@@ -835,6 +855,7 @@ export default function CoachDashboard() {
           practiceDays,
           customNoPracticeDays: customNoPracticeDaysOverride ?? (customNoPracticeDays[squadId] || []),
           customPracticeDays: customPracticeDaysOverride ?? (customPracticeDays[squadId] || []),
+          quarterId: selectedPracticeQuarterScope === 'global' ? null : selectedPracticeQuarterScope,
           sessionType: sessionTypeOverride || sessionType
         })
       });
@@ -942,6 +963,350 @@ export default function CoachDashboard() {
       notMarked
     });
     setShowAthleteStatsModal(true);
+  };
+
+  const buildStatusCounts = (records: any[]) => {
+    const counts = {
+      onTime: 0,
+      lateJustified: 0,
+      late: 0,
+      excused: 0,
+      missing: 0,
+      notMarked: 0,
+    };
+
+    records.forEach((record: any) => {
+      if (record.status === 'on-time') counts.onTime += 1;
+      else if (record.status === 'late-justified') counts.lateJustified += 1;
+      else if (record.status === 'late') counts.late += 1;
+      else if (record.status === 'excused') counts.excused += 1;
+      else if (record.status === 'missing') counts.missing += 1;
+    });
+
+    return counts;
+  };
+
+  const hasPracticeFromMaps = (
+    date: Date,
+    squadId: string,
+    scheduleMap: {[key: string]: string[]},
+    customNoPracticeMap: {[key: string]: string[]},
+    customPracticeMap: {[key: string]: string[]}
+  ) => {
+    const dateString = getLocalDateString(date);
+    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+
+    const squadCustomNoPractice = customNoPracticeMap[squadId] || [];
+    const allTeamCustomNoPractice = customNoPracticeMap['all'] || [];
+    if (squadCustomNoPractice.includes(dateString) || allTeamCustomNoPractice.includes(dateString)) {
+      return false;
+    }
+
+    const squadCustomPractice = customPracticeMap[squadId] || [];
+    const allTeamCustomPractice = customPracticeMap['all'] || [];
+    if (squadCustomPractice.includes(dateString) || allTeamCustomPractice.includes(dateString)) {
+      return true;
+    }
+
+    const squadSchedule = scheduleMap[squadId] || [];
+    return squadSchedule.includes(dayName);
+  };
+
+  const calculateCoachQuarterFinalReport = async () => {
+    if (analyticsViewMode !== 'quarter' || !selectedAnalyticsQuarter || squads.length === 0) {
+      setQuarterFinalReport(null);
+      return;
+    }
+
+    const quarter = quarters.find(q => q.id === selectedAnalyticsQuarter);
+    if (!quarter) {
+      setQuarterFinalReport(null);
+      return;
+    }
+
+    setLoadingQuarterFinalReport(true);
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        setQuarterFinalReport(null);
+        return;
+      }
+
+      const startDate = quarter.start_date;
+      const endDate = quarter.end_date;
+
+      const [practiceAttendanceRes, liftAttendanceRes, practiceScheduleRes, liftScheduleRes] = await Promise.all([
+        fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=practice`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=lift`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`/api/practice-schedule?sessionType=practice&quarterId=${encodeURIComponent(selectedAnalyticsQuarter)}`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`/api/practice-schedule?sessionType=lift&quarterId=${encodeURIComponent(selectedAnalyticsQuarter)}`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+      ]);
+
+      if (!practiceAttendanceRes.ok || !liftAttendanceRes.ok || !practiceScheduleRes.ok || !liftScheduleRes.ok) {
+        setQuarterFinalReport(null);
+        return;
+      }
+
+      const [{ attendance: practiceAttendance }, { attendance: liftAttendance }, { schedules: practiceSchedulesData }, { schedules: liftSchedulesData }] = await Promise.all([
+        practiceAttendanceRes.json(),
+        liftAttendanceRes.json(),
+        practiceScheduleRes.json(),
+        liftScheduleRes.json(),
+      ]);
+
+      const mapSchedules = (schedules: any[]) => {
+        const scheduleMap: {[key: string]: string[]} = {};
+        const customNoPracticeMap: {[key: string]: string[]} = {};
+        const customPracticeMap: {[key: string]: string[]} = {};
+
+        (schedules || []).forEach((schedule: any) => {
+          scheduleMap[schedule.squad_id] = schedule.practice_days || [];
+          customNoPracticeMap[schedule.squad_id] = schedule.custom_no_practice_days || [];
+          customPracticeMap[schedule.squad_id] = schedule.custom_practice_days || [];
+        });
+
+        return { scheduleMap, customNoPracticeMap, customPracticeMap };
+      };
+
+      const practiceMaps = mapSchedules(practiceSchedulesData || []);
+      const liftMaps = mapSchedules(liftSchedulesData || []);
+
+      const practiceByAthlete: {[athleteId: string]: any[]} = {};
+      const liftByAthlete: {[athleteId: string]: any[]} = {};
+      (practiceAttendance || []).forEach((row: any) => {
+        if (!practiceByAthlete[row.athlete_id]) practiceByAthlete[row.athlete_id] = [];
+        practiceByAthlete[row.athlete_id].push(row);
+      });
+      (liftAttendance || []).forEach((row: any) => {
+        if (!liftByAthlete[row.athlete_id]) liftByAthlete[row.athlete_id] = [];
+        liftByAthlete[row.athlete_id].push(row);
+      });
+
+      const start = new Date(startDate + 'T00:00:00');
+      const end = new Date(endDate + 'T00:00:00');
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      const effectiveEnd = end < today ? end : today;
+
+      const memberRows: any[] = [];
+
+      squads.forEach((squad) => {
+        squad.members.forEach((member: any) => {
+          const practiceRecords = practiceByAthlete[member.id] || [];
+          const liftRecords = liftByAthlete[member.id] || [];
+          const practiceCounts = buildStatusCounts(practiceRecords);
+          const liftCounts = buildStatusCounts(liftRecords);
+
+          let practiceScheduled = 0;
+          let liftScheduled = 0;
+          for (let d = new Date(start); d <= effectiveEnd; d.setDate(d.getDate() + 1)) {
+            const currentDate = new Date(d);
+            if (hasPracticeFromMaps(currentDate, squad.id, practiceMaps.scheduleMap, practiceMaps.customNoPracticeMap, practiceMaps.customPracticeMap)) {
+              practiceScheduled += 1;
+            }
+            if (hasPracticeFromMaps(currentDate, squad.id, liftMaps.scheduleMap, liftMaps.customNoPracticeMap, liftMaps.customPracticeMap)) {
+              liftScheduled += 1;
+            }
+          }
+
+          practiceCounts.notMarked = Math.max(
+            practiceScheduled - (practiceCounts.onTime + practiceCounts.lateJustified + practiceCounts.late + practiceCounts.excused + practiceCounts.missing),
+            0
+          );
+          liftCounts.notMarked = Math.max(
+            liftScheduled - (liftCounts.onTime + liftCounts.lateJustified + liftCounts.late + liftCounts.excused + liftCounts.missing),
+            0
+          );
+
+          const practiceAttended = practiceCounts.onTime + practiceCounts.lateJustified;
+          const liftAttended = liftCounts.onTime + liftCounts.lateJustified;
+          const overallScheduled = practiceScheduled + liftScheduled;
+          const overallAttended = practiceAttended + liftAttended;
+          const overallPercentage = overallScheduled > 0 ? Math.round((overallAttended / overallScheduled) * 100) : 0;
+          const practiceMarked = practiceScheduled - practiceCounts.notMarked;
+          const liftMarked = liftScheduled - liftCounts.notMarked;
+          const overallMarked = overallScheduled - (practiceCounts.notMarked + liftCounts.notMarked);
+
+          memberRows.push({
+            athleteId: member.id,
+            name: member.full_name,
+            role: member.role,
+            squadId: squad.id,
+            squadName: squad.displayName,
+            practiceScheduled,
+            practiceAttended,
+            practicePercentage: practiceScheduled > 0 ? Math.round((practiceAttended / practiceScheduled) * 100) : 0,
+            practiceMarked,
+            practiceCoveragePercentage: practiceScheduled > 0 ? Math.round((practiceMarked / practiceScheduled) * 100) : 0,
+            liftScheduled,
+            liftAttended,
+            liftPercentage: liftScheduled > 0 ? Math.round((liftAttended / liftScheduled) * 100) : 0,
+            liftMarked,
+            liftCoveragePercentage: liftScheduled > 0 ? Math.round((liftMarked / liftScheduled) * 100) : 0,
+            overallScheduled,
+            overallAttended,
+            overallPercentage,
+            overallMarked,
+            overallCoveragePercentage: overallScheduled > 0 ? Math.round((overallMarked / overallScheduled) * 100) : 0,
+            counts: {
+              onTime: practiceCounts.onTime + liftCounts.onTime,
+              lateJustified: practiceCounts.lateJustified + liftCounts.lateJustified,
+              late: practiceCounts.late + liftCounts.late,
+              excused: practiceCounts.excused + liftCounts.excused,
+              missing: practiceCounts.missing + liftCounts.missing,
+              notMarked: practiceCounts.notMarked + liftCounts.notMarked,
+            }
+          });
+        });
+      });
+
+      const squadSummaryMap: {[squadId: string]: any} = {};
+      memberRows.forEach((row) => {
+        if (!squadSummaryMap[row.squadId]) {
+          squadSummaryMap[row.squadId] = {
+            squadId: row.squadId,
+            squadName: row.squadName,
+            memberCount: 0,
+            totalScheduled: 0,
+            totalAttended: 0,
+            averagePercentage: 0,
+            missing: 0,
+          };
+        }
+        squadSummaryMap[row.squadId].memberCount += 1;
+        squadSummaryMap[row.squadId].totalScheduled += row.overallScheduled;
+        squadSummaryMap[row.squadId].totalAttended += row.overallAttended;
+        squadSummaryMap[row.squadId].missing += row.counts.missing;
+      });
+
+      Object.values(squadSummaryMap).forEach((summary: any) => {
+        summary.averagePercentage = summary.totalScheduled > 0
+          ? Math.round((summary.totalAttended / summary.totalScheduled) * 100)
+          : 0;
+      });
+
+      const rankedRows = [...memberRows].sort((a, b) => b.overallPercentage - a.overallPercentage);
+
+      setQuarterFinalReport({
+        quarterName: quarter.name,
+        rows: memberRows,
+        squadSummaries: Object.values(squadSummaryMap),
+        topRankings: rankedRows.slice(0, 5),
+        bottomRankings: rankedRows.slice(-5).reverse(),
+      });
+    } catch (error) {
+      console.error('Error calculating coach quarter final report:', error);
+      setQuarterFinalReport(null);
+    } finally {
+      setLoadingQuarterFinalReport(false);
+    }
+  };
+
+  const getSortedQuarterRows = () => {
+    if (!quarterFinalReport?.rows) return [];
+    const rows = [...quarterFinalReport.rows];
+    rows.sort((a: any, b: any) => {
+      let comparison = 0;
+      if (quarterReportSortKey === 'name') comparison = a.name.localeCompare(b.name);
+      else if (quarterReportSortKey === 'squad') comparison = a.squadName.localeCompare(b.squadName);
+      else comparison = (a[quarterReportSortKey] || 0) - (b[quarterReportSortKey] || 0);
+      return quarterReportSortDirection === 'asc' ? comparison : -comparison;
+    });
+    return rows;
+  };
+
+  const exportQuarterFinalReportCsv = () => {
+    if (!quarterFinalReport?.rows) return;
+
+    const headers = [
+      'Name',
+      'Role',
+      'Squad',
+      'Overall %',
+      'Overall Attended',
+      'Overall Scheduled',
+      'Overall Marked',
+      'Overall Coverage %',
+      'Practice %',
+      'Practice Attended',
+      'Practice Scheduled',
+      'Practice Marked',
+      'Practice Coverage %',
+      'Lift %',
+      'Lift Attended',
+      'Lift Scheduled',
+      'Lift Marked',
+      'Lift Coverage %',
+      'On Time',
+      'Late Justified',
+      'Late',
+      'Excused',
+      'Missing',
+      'Not Marked',
+    ];
+
+    const rows = getSortedQuarterRows().map((row: any) => [
+      row.name,
+      row.role,
+      row.squadName,
+      row.overallPercentage,
+      row.overallAttended,
+      row.overallScheduled,
+      row.overallMarked,
+      row.overallCoveragePercentage,
+      row.practicePercentage,
+      row.practiceAttended,
+      row.practiceScheduled,
+      row.practiceMarked,
+      row.practiceCoveragePercentage,
+      row.liftPercentage,
+      row.liftAttended,
+      row.liftScheduled,
+      row.liftMarked,
+      row.liftCoveragePercentage,
+      row.counts.onTime,
+      row.counts.lateJustified,
+      row.counts.late,
+      row.counts.excused,
+      row.counts.missing,
+      row.counts.notMarked,
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${quarterFinalReport.quarterName.replace(/\s+/g, '_').toLowerCase()}_final_attendance_report.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   // Quarter management functions
@@ -1154,6 +1519,12 @@ export default function CoachDashboard() {
       fetchAnalyticsData();
     }
   }, [analyticsViewMode, selectedAnalyticsQuarter]);
+
+  useEffect(() => {
+    if (user && user.user_metadata.role === 'coach' && viewMode === 'analytics') {
+      calculateCoachQuarterFinalReport();
+    }
+  }, [user, viewMode, analyticsViewMode, selectedAnalyticsQuarter, quarters, squads]);
 
   // Persist last used sessionType
   useEffect(() => {
@@ -1695,9 +2066,23 @@ export default function CoachDashboard() {
                 <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-1">{sessionType === 'practice' ? 'Practice' : 'Lift'} Management</h2>
                 <p className="text-gray-600 text-xs sm:text-sm max-w-xl">Configure recurring {sessionType === 'practice' ? 'practice' : 'lift'} days and override with custom cancellations or extra sessions.</p>
               </div>
-              <div className="flex bg-gray-100 rounded-md overflow-hidden border border-gray-300 w-full sm:w-auto">
-                <button onClick={() => setSessionType('practice')} className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${sessionType === 'practice' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Practice</button>
-                <button onClick={() => setSessionType('lift')} className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${sessionType === 'lift' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Lift</button>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <div className="flex bg-gray-100 rounded-md overflow-hidden border border-gray-300 w-full sm:w-auto">
+                  <button onClick={() => setSessionType('practice')} className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${sessionType === 'practice' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Practice</button>
+                  <button onClick={() => setSessionType('lift')} className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${sessionType === 'lift' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Lift</button>
+                </div>
+                <select
+                  value={selectedPracticeQuarterScope}
+                  onChange={(e) => setSelectedPracticeQuarterScope(e.target.value)}
+                  className="px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md text-xs sm:text-sm text-gray-900 bg-white"
+                >
+                  <option value="global">Global (all dates)</option>
+                  {quarters.map((quarter) => (
+                    <option key={quarter.id} value={quarter.id}>
+                      {quarter.name} ({new Date(quarter.start_date + 'T00:00:00').toLocaleDateString()} - {new Date(quarter.end_date + 'T00:00:00').toLocaleDateString()})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -1779,7 +2164,7 @@ export default function CoachDashboard() {
                   </button>
                 </div>
                 
-                <p className="text-gray-600 mb-3 sm:mb-4 text-xs sm:text-sm">Override regular {sessionType === 'practice' ? 'practice' : 'lift'} schedule for specific dates or date ranges. Useful for holidays, tournaments, cancellations, or extra sessions.</p>
+                <p className="text-gray-600 mb-3 sm:mb-4 text-xs sm:text-sm">Override regular {sessionType === 'practice' ? 'practice' : 'lift'} schedule for specific dates or date ranges. Scope: <span className="font-semibold">{selectedPracticeQuarterScope === 'global' ? 'Global (all dates)' : (quarters.find(q => q.id === selectedPracticeQuarterScope)?.name || 'Selected quarter')}</span>.</p>
 
                 {/* Display existing custom days */}
                 <div className="space-y-3 sm:space-y-4">
@@ -2043,6 +2428,17 @@ export default function CoachDashboard() {
                     <span className="hidden sm:inline">Print/PDF</span>
                     <span className="sm:hidden">Print</span>
                   </button>
+
+                  {analyticsViewMode === 'quarter' && selectedAnalyticsQuarter && (
+                    <button
+                      onClick={exportQuarterFinalReportCsv}
+                      className="px-3 sm:px-4 py-1.5 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded transition-colors flex items-center gap-1 sm:gap-2 text-xs sm:text-base w-full sm:w-auto justify-center"
+                    >
+                      <span>⬇️</span>
+                      <span className="hidden sm:inline">Export Final Report CSV</span>
+                      <span className="sm:hidden">CSV</span>
+                    </button>
+                  )}
                 </div>
               </div>
               
@@ -2072,6 +2468,132 @@ export default function CoachDashboard() {
                 </div>
               </div>
             </div>
+
+            {analyticsViewMode === 'quarter' && selectedAnalyticsQuarter && (
+              <div className="mb-6 space-y-3 sm:space-y-4">
+                <p className="text-xs sm:text-sm text-gray-600">Quarter-end summary combines Practice and Lift attendance for each athlete and captain.</p>
+                {loadingQuarterFinalReport && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-gray-600">
+                    Building quarter final report...
+                  </div>
+                )}
+
+                {!loadingQuarterFinalReport && quarterFinalReport && (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
+                      {quarterFinalReport.squadSummaries.map((summary: any) => (
+                        <div key={summary.squadId} className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
+                          <div className="font-semibold text-gray-900 text-sm mb-2">{summary.squadName}</div>
+                          <div className="text-xs text-gray-700">Avg: <span className="font-bold text-blue-700">{summary.averagePercentage}%</span></div>
+                          <div className="text-xs text-gray-700">Attended/Scheduled: {summary.totalAttended}/{summary.totalScheduled}</div>
+                          <div className="text-xs text-gray-700">Missing: {summary.missing}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3">
+                      <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
+                        <h4 className="font-semibold text-gray-900 mb-2 text-sm">Top Attendance</h4>
+                        <div className="space-y-1">
+                          {quarterFinalReport.topRankings.map((row: any) => (
+                            <div key={`top-${row.athleteId}`} className="flex items-center justify-between text-sm">
+                              <span className="text-gray-800">{row.name}</span>
+                              <span className="font-semibold text-green-700">{row.overallPercentage}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
+                        <h4 className="font-semibold text-gray-900 mb-2 text-sm">Needs Support</h4>
+                        <div className="space-y-1">
+                          {quarterFinalReport.bottomRankings.map((row: any) => (
+                            <div key={`bottom-${row.athleteId}`} className="flex items-center justify-between text-sm">
+                              <span className="text-gray-800">{row.name}</span>
+                              <span className="font-semibold text-red-700">{row.overallPercentage}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="px-3 sm:px-4 py-2.5 sm:py-3 border-b border-gray-200 flex flex-wrap gap-2 items-center">
+                        <span className="text-sm font-semibold text-gray-900">All Athletes Final Table</span>
+                        <select
+                          value={quarterReportSortKey}
+                          onChange={(e) => setQuarterReportSortKey(e.target.value as any)}
+                          className="px-2 py-1 border rounded text-sm text-gray-900"
+                        >
+                          <option value="overallPercentage">Sort: Overall %</option>
+                          <option value="overallCoveragePercentage">Sort: Coverage %</option>
+                          <option value="overallAttended">Sort: Attended</option>
+                          <option value="overallScheduled">Sort: Scheduled</option>
+                          <option value="name">Sort: Name</option>
+                          <option value="squad">Sort: Squad</option>
+                        </select>
+                        <button
+                          onClick={() => setQuarterReportSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+                          className="px-2 py-1 border rounded text-sm text-gray-900 hover:bg-gray-50"
+                        >
+                          {quarterReportSortDirection === 'asc' ? 'Ascending' : 'Descending'}
+                        </button>
+                      </div>
+
+                      <div className="block md:hidden p-3 space-y-2">
+                        {getSortedQuarterRows().map((row: any) => (
+                          <div key={`mobile-${row.athleteId}`} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="text-sm font-semibold text-gray-900">{row.name} {row.role === 'captain' ? '🔱' : ''}</div>
+                              <div className="text-sm font-bold text-blue-700">{row.overallPercentage}%</div>
+                            </div>
+                            <div className="text-xs text-gray-600 mb-2">{row.squadName}</div>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="text-gray-700">Attended: <span className="font-semibold text-gray-900">{row.overallAttended}</span></div>
+                              <div className="text-gray-700">Scheduled: <span className="font-semibold text-gray-900">{row.overallScheduled}</span></div>
+                              <div className="text-gray-700">Practice: <span className="font-semibold text-gray-900">{row.practicePercentage}%</span></div>
+                              <div className="text-gray-700">Lift: <span className="font-semibold text-gray-900">{row.liftPercentage}%</span></div>
+                              <div className="text-gray-700 col-span-2">Coverage: <span className="font-semibold text-gray-900">{row.overallCoveragePercentage}%</span> ({row.overallMarked}/{row.overallScheduled} marked)</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="hidden md:block overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="text-left px-3 py-2 text-gray-700">Name</th>
+                              <th className="text-left px-3 py-2 text-gray-700">Squad</th>
+                              <th className="text-right px-3 py-2 text-gray-700">Overall %</th>
+                              <th className="text-right px-3 py-2 text-gray-700">Coverage %</th>
+                              <th className="text-right px-3 py-2 text-gray-700">Attended</th>
+                              <th className="text-right px-3 py-2 text-gray-700">Scheduled</th>
+                              <th className="text-right px-3 py-2 text-gray-700">Practice %</th>
+                              <th className="text-right px-3 py-2 text-gray-700">Lift %</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {getSortedQuarterRows().map((row: any) => (
+                              <tr key={row.athleteId} className="border-t border-gray-100">
+                                <td className="px-3 py-2 text-gray-900">{row.name} {row.role === 'captain' ? '🔱' : ''}</td>
+                                <td className="px-3 py-2 text-gray-700">{row.squadName}</td>
+                                <td className="px-3 py-2 text-right font-semibold text-blue-700">{row.overallPercentage}%</td>
+                                <td className="px-3 py-2 text-right font-semibold text-indigo-700">{row.overallCoveragePercentage}%</td>
+                                <td className="px-3 py-2 text-right text-gray-900">{row.overallAttended}</td>
+                                <td className="px-3 py-2 text-right text-gray-900">{row.overallScheduled}</td>
+                                <td className="px-3 py-2 text-right text-gray-900">{row.practicePercentage}%</td>
+                                <td className="px-3 py-2 text-right text-gray-900">{row.liftPercentage}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             
             {/* Attendance Grid */}
             <div className="overflow-x-auto">

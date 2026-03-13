@@ -28,6 +28,8 @@ export default function CaptainDashboard() {
   const [quarters, setQuarters] = useState<any[]>([]);
   const [selectedQuarter, setSelectedQuarter] = useState<string | null>(null);
   const [quarterStats, setQuarterStats] = useState<{attended: number, total: number, percentage: number} | null>(null);
+  const [finalQuarterReport, setFinalQuarterReport] = useState<any | null>(null);
+  const [loadingFinalQuarterReport, setLoadingFinalQuarterReport] = useState(false);
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   // Bulk attendance and notes state (keyed by date)
   const [selectedAthletes, setSelectedAthletes] = useState<{[date: string]: Set<string>}>({});
@@ -111,7 +113,7 @@ export default function CaptainDashboard() {
     if (user && user.user_metadata.role === 'captain') {
       fetchAttendanceData();
     }
-  }, [currentWeekOffset, user, viewMode, sessionType]);
+  }, [currentWeekOffset, calendarMonth, calendarYear, user, viewMode, sessionType]);
 
 
   const goToCurrentWeek = () => {
@@ -126,8 +128,16 @@ export default function CaptainDashboard() {
       if (!accessToken) return;
 
       const weekDates = getWeekDates();
-      const startDate = getLocalDateString(weekDates[0]);
-      const endDate = getLocalDateString(weekDates[weekDates.length - 1]);
+      const weekStart = weekDates[0];
+      const weekEnd = weekDates[weekDates.length - 1];
+      const monthStart = new Date(calendarYear, calendarMonth - 1, 1);
+      const monthEnd = new Date(calendarYear, calendarMonth + 2, 0);
+
+      const rangeStart = weekStart < monthStart ? weekStart : monthStart;
+      const rangeEnd = weekEnd > monthEnd ? weekEnd : monthEnd;
+
+      const startDate = getLocalDateString(rangeStart);
+      const endDate = getLocalDateString(rangeEnd);
 
   let url = `/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`;
       
@@ -639,6 +649,21 @@ export default function CaptainDashboard() {
     }
   }, [selectedQuarter, currentWeekOffset, practiceSchedules, customNoPracticeDays, customPracticeDays, sessionType]);
 
+  useEffect(() => {
+    calculateFinalQuarterReport();
+  }, [selectedQuarter, user, quarters]);
+
+  useEffect(() => {
+    if (!finalQuarterReport) return;
+    const scoped = finalQuarterReport.byType?.[sessionType];
+    if (!scoped) return;
+    setQuarterStats({
+      attended: scoped.attended,
+      total: scoped.scheduled,
+      percentage: scoped.percentage,
+    });
+  }, [finalQuarterReport, sessionType]);
+
   // Check if there's practice for a squad on a given date
   const hasPractice = (date: Date) => {
     if (!user) return true; // Default to showing practice if we don't know
@@ -666,6 +691,219 @@ export default function CaptainDashboard() {
     // Fall back to regular schedule
     const squadSchedule = practiceSchedules[squadId] || [];
     return squadSchedule.includes(dayName);
+  };
+
+  const hasPracticeFromMaps = (
+    date: Date,
+    squadId: string,
+    scheduleMap: {[key: string]: string[]},
+    customNoPracticeMap: {[key: string]: string[]},
+    customPracticeMap: {[key: string]: string[]}
+  ) => {
+    const dateString = getLocalDateString(date);
+    const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+
+    const squadCustomNoPractice = customNoPracticeMap[squadId] || [];
+    const allTeamCustomNoPractice = customNoPracticeMap['all'] || [];
+    if (squadCustomNoPractice.includes(dateString) || allTeamCustomNoPractice.includes(dateString)) {
+      return false;
+    }
+
+    const squadCustomPractice = customPracticeMap[squadId] || [];
+    const allTeamCustomPractice = customPracticeMap['all'] || [];
+    if (squadCustomPractice.includes(dateString) || allTeamCustomPractice.includes(dateString)) {
+      return true;
+    }
+
+    const squadSchedule = scheduleMap[squadId] || [];
+    return squadSchedule.includes(dayName);
+  };
+
+  const buildStatusCounts = (records: any[]) => {
+    const counts = {
+      onTime: 0,
+      lateJustified: 0,
+      late: 0,
+      excused: 0,
+      missing: 0,
+      notMarked: 0,
+    };
+
+    records.forEach((record: any) => {
+      if (record.status === 'on-time') counts.onTime += 1;
+      else if (record.status === 'late-justified') counts.lateJustified += 1;
+      else if (record.status === 'late') counts.late += 1;
+      else if (record.status === 'excused') counts.excused += 1;
+      else if (record.status === 'missing') counts.missing += 1;
+    });
+
+    return counts;
+  };
+
+  const calculateFinalQuarterReport = async () => {
+    if (!selectedQuarter || !user) {
+      setFinalQuarterReport(null);
+      return;
+    }
+
+    const quarter = quarters.find(q => q.id === selectedQuarter);
+    if (!quarter) {
+      setFinalQuarterReport(null);
+      return;
+    }
+
+    setLoadingFinalQuarterReport(true);
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        setFinalQuarterReport(null);
+        return;
+      }
+
+      const startDate = quarter.start_date;
+      const endDate = quarter.end_date;
+      const squadId = `${user.user_metadata?.gender}_${user.user_metadata?.weapon}`;
+
+      const [practiceAttendanceRes, liftAttendanceRes, practiceScheduleRes, liftScheduleRes] = await Promise.all([
+        fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=practice&athleteId=${user.id}`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=lift&athleteId=${user.id}`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`/api/practice-schedule?sessionType=practice&quarterId=${encodeURIComponent(selectedQuarter)}`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }),
+        fetch(`/api/practice-schedule?sessionType=lift&quarterId=${encodeURIComponent(selectedQuarter)}`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        })
+      ]);
+
+      if (!practiceAttendanceRes.ok || !liftAttendanceRes.ok || !practiceScheduleRes.ok || !liftScheduleRes.ok) {
+        setFinalQuarterReport(null);
+        return;
+      }
+
+      const [{ attendance: practiceAttendance }, { attendance: liftAttendance }, { schedules: practiceSchedulesData }, { schedules: liftSchedulesData }] = await Promise.all([
+        practiceAttendanceRes.json(),
+        liftAttendanceRes.json(),
+        practiceScheduleRes.json(),
+        liftScheduleRes.json(),
+      ]);
+
+      const mapSchedules = (schedules: any[]) => {
+        const scheduleMap: {[key: string]: string[]} = {};
+        const customNoPracticeMap: {[key: string]: string[]} = {};
+        const customPracticeMap: {[key: string]: string[]} = {};
+
+        (schedules || []).forEach((schedule: any) => {
+          scheduleMap[schedule.squad_id] = schedule.practice_days || [];
+          customNoPracticeMap[schedule.squad_id] = schedule.custom_no_practice_days || [];
+          customPracticeMap[schedule.squad_id] = schedule.custom_practice_days || [];
+        });
+
+        return { scheduleMap, customNoPracticeMap, customPracticeMap };
+      };
+
+      const practiceMaps = mapSchedules(practiceSchedulesData || []);
+      const liftMaps = mapSchedules(liftSchedulesData || []);
+
+      const start = new Date(startDate + 'T00:00:00');
+      const end = new Date(endDate + 'T00:00:00');
+      const today = new Date();
+      today.setHours(23, 59, 59, 999);
+      const effectiveEnd = end < today ? end : today;
+
+      let practiceScheduled = 0;
+      let liftScheduled = 0;
+      for (let d = new Date(start); d <= effectiveEnd; d.setDate(d.getDate() + 1)) {
+        const currentDate = new Date(d);
+        if (hasPracticeFromMaps(currentDate, squadId, practiceMaps.scheduleMap, practiceMaps.customNoPracticeMap, practiceMaps.customPracticeMap)) {
+          practiceScheduled += 1;
+        }
+        if (hasPracticeFromMaps(currentDate, squadId, liftMaps.scheduleMap, liftMaps.customNoPracticeMap, liftMaps.customPracticeMap)) {
+          liftScheduled += 1;
+        }
+      }
+
+      const practiceCounts = buildStatusCounts(practiceAttendance || []);
+      const liftCounts = buildStatusCounts(liftAttendance || []);
+
+      practiceCounts.notMarked = Math.max(
+        practiceScheduled - (practiceCounts.onTime + practiceCounts.lateJustified + practiceCounts.late + practiceCounts.excused + practiceCounts.missing),
+        0
+      );
+
+      liftCounts.notMarked = Math.max(
+        liftScheduled - (liftCounts.onTime + liftCounts.lateJustified + liftCounts.late + liftCounts.excused + liftCounts.missing),
+        0
+      );
+
+      const practiceAttended = practiceCounts.onTime + practiceCounts.lateJustified;
+      const liftAttended = liftCounts.onTime + liftCounts.lateJustified;
+      const totalScheduled = practiceScheduled + liftScheduled;
+      const totalAttended = practiceAttended + liftAttended;
+      const totalPercentage = totalScheduled > 0 ? Math.round((totalAttended / totalScheduled) * 100) : 0;
+      const practiceMarked = practiceScheduled - practiceCounts.notMarked;
+      const liftMarked = liftScheduled - liftCounts.notMarked;
+      const totalMarked = totalScheduled - (practiceCounts.notMarked + liftCounts.notMarked);
+
+      setFinalQuarterReport({
+        quarterName: quarter.name,
+        overall: {
+          scheduled: totalScheduled,
+          attended: totalAttended,
+          percentage: totalPercentage,
+          marked: totalMarked,
+          coveragePercentage: totalScheduled > 0 ? Math.round((totalMarked / totalScheduled) * 100) : 0,
+          counts: {
+            onTime: practiceCounts.onTime + liftCounts.onTime,
+            lateJustified: practiceCounts.lateJustified + liftCounts.lateJustified,
+            late: practiceCounts.late + liftCounts.late,
+            excused: practiceCounts.excused + liftCounts.excused,
+            missing: practiceCounts.missing + liftCounts.missing,
+            notMarked: practiceCounts.notMarked + liftCounts.notMarked,
+          }
+        },
+        byType: {
+          practice: {
+            scheduled: practiceScheduled,
+            attended: practiceAttended,
+            percentage: practiceScheduled > 0 ? Math.round((practiceAttended / practiceScheduled) * 100) : 0,
+            marked: practiceMarked,
+            coveragePercentage: practiceScheduled > 0 ? Math.round((practiceMarked / practiceScheduled) * 100) : 0,
+            counts: practiceCounts,
+          },
+          lift: {
+            scheduled: liftScheduled,
+            attended: liftAttended,
+            percentage: liftScheduled > 0 ? Math.round((liftAttended / liftScheduled) * 100) : 0,
+            marked: liftMarked,
+            coveragePercentage: liftScheduled > 0 ? Math.round((liftMarked / liftScheduled) * 100) : 0,
+            counts: liftCounts,
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error calculating final quarter report:', error);
+      setFinalQuarterReport(null);
+    } finally {
+      setLoadingFinalQuarterReport(false);
+    }
   };
 
   // Calendar helper functions
@@ -1618,6 +1856,76 @@ export default function CaptainDashboard() {
                     {!selectedQuarter && (
                       <div className="text-center py-8 text-gray-500">
                         Select a quarter to view statistics
+                      </div>
+                    )}
+
+                    {selectedQuarter && (
+                      <div className="mt-6 border-t pt-5 sm:pt-6">
+                        <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-1">Final Quarter Report</h4>
+                        <p className="text-xs sm:text-sm text-gray-600 mb-4">Combined quarter summary across Practice and Lift.</p>
+
+                        {loadingFinalQuarterReport && (
+                          <div className="text-center py-6 text-gray-500">Building final report...</div>
+                        )}
+
+                        {!loadingFinalQuarterReport && finalQuarterReport && (
+                          <div className="space-y-3 sm:space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 text-center">
+                                <div className="text-2xl font-bold text-blue-700">{finalQuarterReport.overall.percentage}%</div>
+                                <div className="text-xs text-blue-700 mt-1">Overall Attendance Rate</div>
+                              </div>
+                              <div className="bg-green-50 border border-green-200 rounded-lg p-3 sm:p-4 text-center">
+                                <div className="text-2xl font-bold text-green-700">{finalQuarterReport.overall.attended}</div>
+                                <div className="text-xs text-green-700 mt-1">Total Attended</div>
+                              </div>
+                              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 sm:p-4 text-center">
+                                <div className="text-2xl font-bold text-purple-700">{finalQuarterReport.overall.scheduled}</div>
+                                <div className="text-xs text-purple-700 mt-1">Total Scheduled</div>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
+                                <h5 className="font-semibold text-gray-900 mb-2">Practice</h5>
+                                <div className="text-sm text-gray-700">{finalQuarterReport.byType.practice.attended} / {finalQuarterReport.byType.practice.scheduled} attended ({finalQuarterReport.byType.practice.percentage}%)</div>
+                                <div className="text-xs text-gray-600 mt-1">Marked: {finalQuarterReport.byType.practice.marked}/{finalQuarterReport.byType.practice.scheduled} ({finalQuarterReport.byType.practice.coveragePercentage}% coverage)</div>
+                              </div>
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
+                                <h5 className="font-semibold text-gray-900 mb-2">Lift</h5>
+                                <div className="text-sm text-gray-700">{finalQuarterReport.byType.lift.attended} / {finalQuarterReport.byType.lift.scheduled} attended ({finalQuarterReport.byType.lift.percentage}%)</div>
+                                <div className="text-xs text-gray-600 mt-1">Marked: {finalQuarterReport.byType.lift.marked}/{finalQuarterReport.byType.lift.scheduled} ({finalQuarterReport.byType.lift.coveragePercentage}% coverage)</div>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+                              <div className="bg-green-50 rounded-lg p-2.5 sm:p-3 text-center">
+                                <div className="text-lg font-bold text-green-700">{finalQuarterReport.overall.counts.onTime}</div>
+                                <div className="text-xs text-gray-700">On Time</div>
+                              </div>
+                              <div className="bg-green-50 rounded-lg p-2.5 sm:p-3 text-center">
+                                <div className="text-lg font-bold text-green-700">{finalQuarterReport.overall.counts.lateJustified}</div>
+                                <div className="text-xs text-gray-700">Late (Justified)</div>
+                              </div>
+                              <div className="bg-yellow-50 rounded-lg p-2.5 sm:p-3 text-center">
+                                <div className="text-lg font-bold text-yellow-700">{finalQuarterReport.overall.counts.late}</div>
+                                <div className="text-xs text-gray-700">Late</div>
+                              </div>
+                              <div className="bg-blue-50 rounded-lg p-2.5 sm:p-3 text-center">
+                                <div className="text-lg font-bold text-blue-700">{finalQuarterReport.overall.counts.excused}</div>
+                                <div className="text-xs text-gray-700">Excused</div>
+                              </div>
+                              <div className="bg-red-50 rounded-lg p-2.5 sm:p-3 text-center">
+                                <div className="text-lg font-bold text-red-700">{finalQuarterReport.overall.counts.missing}</div>
+                                <div className="text-xs text-gray-700">Missing</div>
+                              </div>
+                              <div className="bg-gray-100 rounded-lg p-2.5 sm:p-3 text-center">
+                                <div className="text-lg font-bold text-gray-700">{finalQuarterReport.overall.counts.notMarked}</div>
+                                <div className="text-xs text-gray-700">Not Marked</div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
