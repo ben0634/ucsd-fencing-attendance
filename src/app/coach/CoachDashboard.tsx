@@ -51,6 +51,8 @@ export default function CoachDashboard() {
   const [quarterReportSortKey, setQuarterReportSortKey] = useState<'name' | 'squad' | 'overallPercentage' | 'overallCoveragePercentage' | 'overallAttended' | 'overallScheduled'>('overallPercentage');
   const [quarterReportSortDirection, setQuarterReportSortDirection] = useState<'asc' | 'desc'>('desc');
   const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [attendanceDayIndex, setAttendanceDayIndex] = useState<number>(new Date().getDay());
+  const [expandedAttendanceSquads, setExpandedAttendanceSquads] = useState<{[key: string]: boolean}>({});
   const practiceScheduleRequestRef = useRef(0);
   const [scopedScheduleMaps, setScopedScheduleMaps] = useState<{
     [key: string]: {
@@ -278,6 +280,40 @@ export default function CoachDashboard() {
 
   const weekDates = getWeekDates();
   const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const activeAttendanceDate = weekDates[attendanceDayIndex] || weekDates[0];
+  const activeAttendanceDayName = dayNames[attendanceDayIndex] || dayNames[0];
+
+  const goToPreviousAttendanceDay = () => {
+    if (attendanceDayIndex === 0) {
+      setCurrentWeekOffset((week) => week - 1);
+      setAttendanceDayIndex(6);
+      return;
+    }
+
+    setAttendanceDayIndex((prev) => prev - 1);
+  };
+
+  const goToNextAttendanceDay = () => {
+    if (attendanceDayIndex === 6) {
+      setCurrentWeekOffset((week) => week + 1);
+      setAttendanceDayIndex(0);
+      return;
+    }
+
+    setAttendanceDayIndex((prev) => prev + 1);
+  };
+
+  const goToTodayAttendanceDay = () => {
+    setCurrentWeekOffset(0);
+    setAttendanceDayIndex(new Date().getDay());
+  };
+
+  const toggleAttendanceSquadExpanded = (squadId: string) => {
+    setExpandedAttendanceSquads((prev) => ({
+      ...prev,
+      [squadId]: !prev[squadId],
+    }));
+  };
 
   const goToPreviousWeek = () => {
     setCurrentWeekOffset(currentWeekOffset - 1);
@@ -290,6 +326,30 @@ export default function CoachDashboard() {
   const goToCurrentWeek = () => {
     setCurrentWeekOffset(0);
   };
+
+  useEffect(() => {
+    if (currentWeekOffset === 0) {
+      setAttendanceDayIndex(new Date().getDay());
+    } else {
+      setAttendanceDayIndex((prev) => Math.max(0, Math.min(6, prev)));
+    }
+  }, [currentWeekOffset]);
+
+  useEffect(() => {
+    if (!squads.length) return;
+
+    setExpandedAttendanceSquads((prev) => {
+      const next = { ...prev };
+
+      squads.forEach((squad, index) => {
+        if (next[squad.id] === undefined) {
+          next[squad.id] = index === 0;
+        }
+      });
+
+      return next;
+    });
+  }, [squads]);
 
   // Fetch squads and their members
   const fetchSquads = async () => {
@@ -2104,81 +2164,130 @@ export default function CoachDashboard() {
                 </h2>
               </div>
 
-              <select
-                value={selectedSquad || ''}
-                onChange={(e) => setSelectedSquad(e.target.value || null)}
-                className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base w-full sm:w-auto"
-              >
-                <option value="">All Squads</option>
-                {squads.map(squad => (
-                  <option key={squad.id} value={squad.id}>{squad.displayName}</option>
-                ))}
-              </select>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={goToPreviousAttendanceDay}
+                    className="px-2 sm:px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-xs sm:text-sm"
+                  >
+                    <span className="hidden sm:inline">← Previous Day</span>
+                    <span className="sm:hidden">← Day</span>
+                  </button>
+                  <button
+                    onClick={goToNextAttendanceDay}
+                    className="px-2 sm:px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-xs sm:text-sm"
+                  >
+                    <span className="hidden sm:inline">Next Day →</span>
+                    <span className="sm:hidden">Day →</span>
+                  </button>
+                </div>
+
+                <button
+                  onClick={goToTodayAttendanceDay}
+                  className="px-2 sm:px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs sm:text-sm w-fit"
+                >
+                  Go to Today
+                </button>
+
+                <div className="text-sm sm:text-base font-semibold text-gray-900 bg-indigo-50 border border-indigo-200 rounded px-3 py-1.5 w-fit">
+                  {activeAttendanceDayName} ({formatDate(activeAttendanceDate)})
+                </div>
+
+                <div className="flex items-center gap-2 ml-0 sm:ml-auto">
+                  <button
+                    onClick={() =>
+                      setExpandedAttendanceSquads(
+                        squads.reduce((acc: {[key: string]: boolean}, squad) => {
+                          acc[squad.id] = true;
+                          return acc;
+                        }, {})
+                      )
+                    }
+                    className="px-2 sm:px-3 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-xs sm:text-sm"
+                  >
+                    Expand All
+                  </button>
+                  <button
+                    onClick={() =>
+                      setExpandedAttendanceSquads(
+                        squads.reduce((acc: {[key: string]: boolean}, squad, index) => {
+                          acc[squad.id] = false;
+                          return acc;
+                        }, {})
+                      )
+                    }
+                    className="px-2 sm:px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-xs sm:text-sm"
+                  >
+                    Collapse All
+                  </button>
+                </div>
+              </div>
             </div>
 
-            {squads
-              .filter(squad => !selectedSquad || squad.id === selectedSquad)
-              .map(squad => (
-                <div key={squad.id} className="mb-4 sm:mb-8">
-                  <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4">{squad.displayName}</h3>
-                  
-                  <div className="space-y-3 sm:space-y-4">
-                    {dayNames.map((dayName, dayIndex) => {
-                      const currentDate = weekDates[dayIndex];
-                      const hasSquadPractice = hasPractice(squad.id, currentDate);
-                      
-                      if (!hasSquadPractice) {
-                        return (
-                          <div key={dayName} className="border rounded p-2 sm:p-3 bg-gray-50">
-                            <h4 className="font-bold text-sm sm:text-lg text-gray-600">
-                              <span className="hidden sm:inline">{dayName} ({formatDate(currentDate)}) - No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
-                              <span className="sm:hidden">{dayName.substring(0, 3)} {formatDate(currentDate)} - No {sessionType === 'practice' ? 'Prac' : 'Lift'}</span>
-                            </h4>
-                            <div className="text-xs sm:text-sm text-gray-500 mt-1 sm:mt-2">
-                              <span className="hidden sm:inline">No practice scheduled for this day</span>
-                              <span className="sm:hidden">Not scheduled</span>
-                            </div>
-                          </div>
-                        );
-                      }
+            <div className="space-y-2 sm:space-y-3">
+              {squads.map(squad => {
+                const hasSquadPractice = hasPractice(squad.id, activeAttendanceDate);
+                const isExpanded = expandedAttendanceSquads[squad.id] ?? false;
 
-                      return (
-                        <div key={dayName} className="border rounded p-2 sm:p-3">
-                          <h4 className="font-bold text-sm sm:text-lg mb-2 sm:mb-3 text-gray-900">
-                            <span className="hidden sm:inline">{dayName} ({formatDate(currentDate)})</span>
-                            <span className="sm:hidden">{dayName.substring(0, 3)} {formatDate(currentDate)}</span>
-                          </h4>
-                          
+                return (
+                  <div key={squad.id} className="border rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => toggleAttendanceSquadExpanded(squad.id)}
+                      className="w-full flex items-center justify-between px-3 sm:px-4 py-3 bg-gray-50 hover:bg-gray-100 transition"
+                    >
+                      <div className="flex items-center gap-2 sm:gap-3 text-left">
+                        <span className="text-sm sm:text-base font-bold text-gray-900">{squad.displayName}</span>
+                        <span className={`text-[11px] sm:text-xs px-2 py-1 rounded-full font-semibold ${
+                          hasSquadPractice
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-gray-200 text-gray-600'
+                        }`}>
+                          {hasSquadPractice ? `${sessionType === 'practice' ? 'Practice' : 'Lift'} Scheduled` : `No ${sessionType === 'practice' ? 'Practice' : 'Lift'}`}
+                        </span>
+                      </div>
+                      <span className="text-gray-600 text-lg">{isExpanded ? '−' : '+'}</span>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="p-2 sm:p-3 bg-white">
+                        {!hasSquadPractice ? (
+                          <div className="border rounded p-3 bg-gray-50 text-sm text-gray-600">
+                            No {sessionType === 'practice' ? 'practice' : 'lift'} scheduled for this squad on {activeAttendanceDayName} ({formatDate(activeAttendanceDate)}).
+                          </div>
+                        ) : (
                           <div className="grid gap-1.5 sm:gap-2">
                             {squad.members.map((member: any) => {
-                              const currentStatus = getAttendanceStatus(member.id, currentDate);
-                              const markingKey = `${member.id}-${getLocalDateString(currentDate)}`;
+                              const currentStatus = getAttendanceStatus(member.id, activeAttendanceDate);
+                              const markingKey = `${member.id}-${getLocalDateString(activeAttendanceDate)}`;
                               const isMarking = markingAttendance[markingKey];
-                              
+
                               return (
-                                <div key={member.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-1.5 sm:p-2 bg-gray-50 rounded gap-1.5">
-                                  <div className="flex-1">
-                                    <span className="font-medium text-gray-900 text-xs sm:text-base">
+                                <div key={member.id} className="flex flex-col lg:flex-row lg:items-center lg:justify-between p-2 bg-gray-50 rounded gap-1.5 sm:gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-gray-900 text-sm sm:text-base truncate">
                                       {member.full_name}
                                       {member.role === 'captain' && (
-                                        <span className="ml-1 sm:ml-2 text-[10px] sm:text-xs bg-blue-100 text-blue-800 px-1 sm:px-2 py-0.5 sm:py-1 rounded">
+                                        <span className="ml-2 text-[10px] sm:text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
                                           Captain 🔱
                                         </span>
                                       )}
-                                    </span>
-                                    {currentStatus && (() => {
-                                      const notes = getAttendanceNotes(member.id, currentDate);
+                                    </div>
+
+                                    {(() => {
+                                      const notes = getAttendanceNotes(member.id, activeAttendanceDate);
                                       return (
-                                        <div className="text-[10px] sm:text-xs text-gray-600 mt-0.5 sm:mt-1 flex items-center gap-1">
+                                        <div className="text-xs sm:text-sm text-gray-600 mt-1 flex items-center gap-2">
                                           <span>
-                                            Current: <span className={`font-medium ${
+                                            Current: <span className={`font-semibold ${
+                                              !currentStatus ? 'text-gray-500' :
                                               currentStatus === 'on-time' ? 'text-green-600' :
                                               currentStatus === 'late' ? 'text-yellow-600' :
                                               currentStatus === 'late-justified' ? 'text-green-600' :
                                               currentStatus === 'excused' ? 'text-blue-600' :
                                               'text-red-600'
                                             }`}>
-                                              {currentStatus === 'on-time' ? 'On Time' :
+                                              {!currentStatus ? 'Not Marked' :
+                                               currentStatus === 'on-time' ? 'On Time' :
                                                currentStatus === 'late' ? 'Late' :
                                                currentStatus === 'late-justified' ? 'Late (Justified)' :
                                                currentStatus === 'excused' ? 'Excused' :
@@ -2187,9 +2296,7 @@ export default function CoachDashboard() {
                                           </span>
                                           {notes && (
                                             <div className="relative group">
-                                              <span className="inline-flex items-center text-blue-600">
-                                                📝
-                                              </span>
+                                              <span className="inline-flex items-center text-blue-600">📝</span>
                                               <div className="hidden group-hover:block absolute z-50 bg-gray-900 text-white text-xs rounded px-2 py-1 -translate-y-full -mt-1 left-0 whitespace-normal max-w-xs shadow-lg">
                                                 {notes}
                                                 <div className="absolute top-full left-2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
@@ -2200,46 +2307,72 @@ export default function CoachDashboard() {
                                       );
                                     })()}
                                   </div>
-                                  
-                                  <div className="flex flex-wrap gap-1 sm:gap-2">
+
+                                    <div className="w-full lg:w-auto lg:min-w-[640px]">
                                     {isMarking && (
-                                      <div className="text-xs sm:text-sm text-gray-500 w-full sm:w-auto sm:mr-2">Updating...</div>
+                                      <div className="text-xs sm:text-sm text-gray-500 mb-2">Updating...</div>
                                     )}
-                                    {['on-time', 'late-justified', 'late', 'excused', 'missing'].map((status) => (
-                                      <button
-                                        key={status}
-                                        onClick={() => markAttendance(member.id, currentDate, status)}
-                                        disabled={isMarking}
-                                        className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-[10px] sm:text-xs font-medium transition-colors ${
-                                          currentStatus === status 
-                                            ? 'ring-2 ring-blue-300 ' 
-                                            : ''
-                                        }${
-                                          status === 'on-time' ? 'bg-green-500 hover:bg-green-600 text-white' :
-                                          status === 'late-justified' ? 'bg-green-600 hover:bg-green-700 text-white' :
-                                          status === 'late' ? 'bg-yellow-500 hover:bg-yellow-600 text-white' :
-                                          status === 'excused' ? 'bg-blue-500 hover:bg-blue-600 text-white' :
-                                          'bg-red-500 hover:bg-red-600 text-white'
-                                        }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
-                                      >
-                                        {status === 'on-time' ? 'On Time' :
-                                         status === 'late-justified' ? 'Late (J)' :
-                                         status === 'late' ? 'Late' :
-                                         status === 'excused' ? 'Excused' :
-                                         'Missing'}
-                                      </button>
-                                    ))}
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="flex flex-wrap gap-1.5 rounded-xl border border-gray-200 bg-white p-1">
+                                        {['on-time', 'late-justified', 'late'].map((status) => (
+                                          <button
+                                            key={status}
+                                            onClick={() => markAttendance(member.id, activeAttendanceDate, status)}
+                                            disabled={isMarking}
+                                            className={`h-9 sm:h-10 min-w-[100px] px-3 rounded-lg border border-transparent text-xs sm:text-sm font-semibold text-white transition-all shadow-sm ${
+                                              status === 'on-time'
+                                                ? 'bg-green-500 hover:bg-green-600'
+                                                : status === 'late-justified'
+                                                ? 'bg-green-600 hover:bg-green-700'
+                                                : 'bg-yellow-500 hover:bg-yellow-600'
+                                            } ${
+                                              currentStatus === status
+                                                ? 'ring-2 ring-white/90 ring-offset-2 ring-offset-gray-200 shadow-md scale-[1.01]'
+                                                : 'opacity-95 hover:opacity-100'
+                                            }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                          >
+                                            {status === 'on-time' ? 'On Time' :
+                                             status === 'late-justified' ? 'Late (J)' :
+                                             'Late'}
+                                          </button>
+                                        ))}
+                                      </div>
+
+                                      <div className="hidden lg:block h-7 w-px bg-gray-300" />
+
+                                      <div className="flex flex-wrap gap-1.5 rounded-xl border border-gray-200 bg-white p-1">
+                                        {['excused', 'missing'].map((status) => (
+                                          <button
+                                            key={status}
+                                            onClick={() => markAttendance(member.id, activeAttendanceDate, status)}
+                                            disabled={isMarking}
+                                            className={`h-9 sm:h-10 min-w-[100px] px-3 rounded-lg border border-transparent text-xs sm:text-sm font-semibold text-white transition-all shadow-sm ${
+                                              status === 'excused'
+                                                ? 'bg-blue-500 hover:bg-blue-600'
+                                                : 'bg-red-500 hover:bg-red-600'
+                                            } ${
+                                              currentStatus === status
+                                                ? 'ring-2 ring-white/90 ring-offset-2 ring-offset-gray-200 shadow-md scale-[1.01]'
+                                                : 'opacity-95 hover:opacity-100'
+                                            }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                          >
+                                            {status === 'excused' ? 'Excused' : 'Missing'}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
                                   </div>
                                 </div>
                               );
                             })}
                           </div>
-                        </div>
-                      );
-                    })}
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
+            </div>
           </div>
         ) : viewMode === 'captains' ? (
           // Captain Management Mode

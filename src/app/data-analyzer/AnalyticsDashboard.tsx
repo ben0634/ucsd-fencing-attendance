@@ -528,7 +528,9 @@ export default function AnalyticsDashboard() {
       const allPastDates = getAllPastPracticeDates(gender, weapon);
       
       squadAthletes.forEach(athlete => {
-        const athleteAttendance = attendanceData.filter(a => a.athlete_id === athlete.id);
+        const athleteAttendance = attendanceData.filter(
+          (a) => a.athlete_id === athlete.id && allPastDates.has(a.date)
+        );
         const markedDates = new Set(athleteAttendance.map(a => a.date));
         
         athleteAttendance.forEach(record => {
@@ -539,6 +541,7 @@ export default function AnalyticsDashboard() {
             totalAttended++;
             lateJustified++;
           } else if (record.status === 'late') {
+            totalAttended++;
             late++;
           } else if (record.status === 'excused') {
             excused++;
@@ -558,19 +561,23 @@ export default function AnalyticsDashboard() {
       });
     });
 
-    const totalEligible = totalPractices - excused;
-    const attendanceRate = totalEligible > 0 ? (totalAttended / totalEligible) * 100 : null;
+    const attendanceRate = totalPractices > 0 ? (totalAttended / totalPractices) * 100 : null;
+    const totalMarked = totalPractices - notMarked;
+    const coverageRate = totalPractices > 0 ? (totalMarked / totalPractices) * 100 : null;
 
     return {
       totalAthletes: filteredAthletes.length,
       totalPractices,
+      totalMarked,
       totalAttended,
       attendanceRate,
+      coverageRate,
       onTime,
       late,
       lateJustified,
       excused,
-      missing
+      missing,
+      notMarked
     };
   };
 
@@ -585,29 +592,35 @@ export default function AnalyticsDashboard() {
 
       let totalAttended = 0;
       let totalPractices = 0;
-      let excused = 0;
+      let totalMarked = 0;
+      const allPastDates = getAllPastPracticeDates(gender, weapon);
 
       squadAthletes.forEach(athlete => {
-        const athleteAttendance = attendanceData.filter(a => a.athlete_id === athlete.id);
+        const athleteAttendance = attendanceData.filter(
+          (a) => a.athlete_id === athlete.id && allPastDates.has(a.date)
+        );
+        const markedDates = new Set(athleteAttendance.map((a) => a.date));
+
         athleteAttendance.forEach(record => {
-          totalPractices++;
-          if (record.status === 'on-time' || record.status === 'late-justified') {
+          if (record.status === 'on-time' || record.status === 'late-justified' || record.status === 'late') {
             totalAttended++;
-          } else if (record.status === 'excused') {
-            excused++;
           }
         });
+
+        totalPractices += allPastDates.size;
+        totalMarked += markedDates.size;
       });
 
-      const totalEligible = totalPractices - excused;
-      const attendanceRate = totalEligible > 0 ? (totalAttended / totalEligible) * 100 : null;
+      const attendanceRate = totalPractices > 0 ? (totalAttended / totalPractices) * 100 : null;
+      const coverageRate = totalPractices > 0 ? (totalMarked / totalPractices) * 100 : null;
 
       return {
         squad: squadKey,
         label: `${gender === 'male' ? "Men's" : "Women's"} ${weapon.charAt(0).toUpperCase() + weapon.slice(1)}`,
         athleteCount: squadAthletes.length,
         totalPractices,
-        attendanceRate: attendanceRate !== null ? attendanceRate.toFixed(1) : 'N/A'
+        attendanceRate: attendanceRate !== null ? attendanceRate.toFixed(1) : 'N/A',
+        coverageRate: coverageRate !== null ? coverageRate.toFixed(1) : 'N/A'
       };
     });
   };
@@ -618,21 +631,19 @@ export default function AnalyticsDashboard() {
     
     const athleteStats = filteredAthletes.map(athlete => {
       const allPastDates = getAllPastPracticeDates(athlete.gender, athlete.weapon);
-      const athleteAttendance = attendanceData.filter(a => a.athlete_id === athlete.id);
+      const athleteAttendance = attendanceData.filter(
+        (a) => a.athlete_id === athlete.id && allPastDates.has(a.date)
+      );
       let attended = 0;
-      let excused = 0;
 
       athleteAttendance.forEach(record => {
-        if (record.status === 'on-time' || record.status === 'late-justified') {
+        if (record.status === 'on-time' || record.status === 'late-justified' || record.status === 'late') {
           attended++;
-        } else if (record.status === 'excused') {
-          excused++;
         }
       });
 
       const total = allPastDates.size;
-      const totalEligible = total - excused;
-      const rate = totalEligible > 0 ? (attended / totalEligible) * 100 : null;
+      const rate = total > 0 ? (attended / total) * 100 : null;
 
       return {
         name: athlete.full_name || `${athlete.firstName || ''} ${athlete.lastName || ''}`.trim() || athlete.username,
@@ -659,11 +670,54 @@ export default function AnalyticsDashboard() {
       .slice(0, 10);
   };
 
+  // Get worst performers
+  const getWorstPerformers = () => {
+    const filteredAthletes = getFilteredAthletes();
+
+    const athleteStats = filteredAthletes.map(athlete => {
+      const allPastDates = getAllPastPracticeDates(athlete.gender, athlete.weapon);
+      const athleteAttendance = attendanceData.filter(
+        (a) => a.athlete_id === athlete.id && allPastDates.has(a.date)
+      );
+      let attended = 0;
+
+      athleteAttendance.forEach(record => {
+        if (record.status === 'on-time' || record.status === 'late-justified' || record.status === 'late') {
+          attended++;
+        }
+      });
+
+      const total = allPastDates.size;
+      const rate = total > 0 ? (attended / total) * 100 : null;
+
+      return {
+        name: athlete.full_name || `${athlete.firstName || ''} ${athlete.lastName || ''}`.trim() || athlete.username,
+        squad: `${athlete.gender === 'male' ? "Men's" : "Women's"} ${athlete.weapon?.charAt(0).toUpperCase() + athlete.weapon?.slice(1)}`,
+        attended,
+        total,
+        rate
+      };
+    });
+
+    return athleteStats
+      .filter(a => a.total > 0)
+      .sort((a, b) => {
+        if (a.rate === null && b.rate === null) return 0;
+        if (a.rate === null) return 1;
+        if (b.rate === null) return -1;
+
+        if (a.rate !== b.rate) return a.rate - b.rate;
+        return a.attended - b.attended;
+      })
+      .slice(0, 10);
+  };
+
   if (loading) return <p className="p-4">Loading...</p>;
 
   const overallStats = calculateOverallStats();
   const squadStats = calculateSquadStats();
   const topPerformers = getTopPerformers();
+  const worstPerformers = getWorstPerformers();
   const squads = getSquads();
 
   return (
@@ -763,7 +817,7 @@ export default function AnalyticsDashboard() {
           <>
         {/* Overall Statistics Cards */}
         {overallStats && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 mb-6">
             <div className="bg-white rounded-xl shadow-lg p-4 border-l-4 border-blue-500">
               <div className="text-3xl font-bold text-blue-700">{overallStats.totalAthletes}</div>
               <div className="text-sm text-gray-600 mt-1">Athletes</div>
@@ -778,6 +832,12 @@ export default function AnalyticsDashboard() {
               </div>
               <div className="text-sm text-gray-600 mt-1">Attendance Rate</div>
             </div>
+            <div className="bg-white rounded-xl shadow-lg p-4 border-l-4 border-cyan-500">
+              <div className="text-3xl font-bold text-cyan-700">
+                {overallStats.coverageRate !== null ? `${overallStats.coverageRate.toFixed(1)}%` : 'N/A'}
+              </div>
+              <div className="text-sm text-gray-600 mt-1">Coverage</div>
+            </div>
             <div className="bg-white rounded-xl shadow-lg p-4 border-l-4 border-emerald-500">
               <div className="text-3xl font-bold text-emerald-700">{overallStats.onTime}</div>
               <div className="text-sm text-gray-600 mt-1">On Time</div>
@@ -786,10 +846,14 @@ export default function AnalyticsDashboard() {
               <div className="text-3xl font-bold text-yellow-700">{overallStats.late}</div>
               <div className="text-sm text-gray-600 mt-1">Late</div>
             </div>
+            <div className="bg-white rounded-xl shadow-lg p-4 border-l-4 border-purple-500">
+              <div className="text-3xl font-bold text-purple-700">{overallStats.notMarked}</div>
+              <div className="text-sm text-gray-600 mt-1">Not Marked</div>
+            </div>
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           {/* Squad Comparison */}
           <div className="bg-white rounded-xl shadow-lg p-6">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Squad Performance</h3>
@@ -808,6 +872,9 @@ export default function AnalyticsDashboard() {
                       ></div>
                     </div>
                     <span className="text-sm font-bold text-blue-700 min-w-[50px]">{squad.attendanceRate !== 'N/A' ? `${squad.attendanceRate}%` : 'N/A'}</span>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Coverage: {squad.coverageRate !== 'N/A' ? `${squad.coverageRate}%` : 'N/A'}
                   </div>
                 </div>
               ))}
@@ -844,13 +911,39 @@ export default function AnalyticsDashboard() {
               ))}
             </div>
           </div>
+
+          {/* Worst Performers */}
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h3 className="text-xl font-bold text-gray-800 mb-4">Worst Performers</h3>
+            <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
+              {worstPerformers.slice(0, 10).map((performer, index) => (
+                <div key={index} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-white bg-red-500">
+                      {index + 1}
+                    </div>
+                    <div>
+                      <div className="font-semibold text-gray-800 text-sm">{performer.name}</div>
+                      <div className="text-xs text-gray-500">{performer.squad}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-red-700">
+                      {performer.rate !== null ? `${performer.rate.toFixed(1)}%` : 'N/A'}
+                    </div>
+                    <div className="text-xs text-gray-500">{performer.attended}/{performer.total}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Detailed Breakdown */}
         {overallStats && (
           <div className="bg-white rounded-xl shadow-lg p-6">
             <h3 className="text-xl font-bold text-gray-800 mb-4">Attendance Breakdown</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4">
               <div className="text-center p-4 bg-green-50 rounded-lg">
                 <div className="text-2xl font-bold text-green-700">{overallStats.onTime}</div>
                 <div className="text-sm text-gray-600">On Time</div>
@@ -884,6 +977,20 @@ export default function AnalyticsDashboard() {
                 <div className="text-sm text-gray-600">Missing</div>
                 <div className="text-xs text-red-600 mt-1">
                   {overallStats.totalPractices > 0 ? ((overallStats.missing / overallStats.totalPractices) * 100).toFixed(1) : 0}%
+                </div>
+              </div>
+              <div className="text-center p-4 bg-purple-50 rounded-lg">
+                <div className="text-2xl font-bold text-purple-700">{overallStats.notMarked}</div>
+                <div className="text-sm text-gray-600">Not Marked</div>
+                <div className="text-xs text-purple-600 mt-1">
+                  {overallStats.totalPractices > 0 ? ((overallStats.notMarked / overallStats.totalPractices) * 100).toFixed(1) : 0}%
+                </div>
+              </div>
+              <div className="text-center p-4 bg-cyan-50 rounded-lg">
+                <div className="text-2xl font-bold text-cyan-700">{overallStats.totalMarked}</div>
+                <div className="text-sm text-gray-600">Marked</div>
+                <div className="text-xs text-cyan-600 mt-1">
+                  {overallStats.coverageRate !== null ? `${overallStats.coverageRate.toFixed(1)}%` : 'N/A'}
                 </div>
               </div>
             </div>
@@ -926,13 +1033,16 @@ export default function AnalyticsDashboard() {
                         <th className="p-2 font-semibold text-yellow-700 text-center w-[70px]">Late</th>
                         <th className="p-2 font-semibold text-blue-700 text-center w-[80px]">Excused</th>
                         <th className="p-2 font-semibold text-red-700 text-center w-[80px]">Missing</th>
+                        <th className="p-2 font-semibold text-purple-700 text-center w-[100px]">Not Marked</th>
                       </tr>
                     </thead>
                     <tbody>
                       {squadAthletes.map(athlete => {
                         // Get all past practice dates for this squad
                         const allPastDates = getAllPastPracticeDates(gender, weapon);
-                        const athleteAttendance = attendanceData.filter(a => a.athlete_id === athlete.id);
+                        const athleteAttendance = attendanceData.filter(
+                          (a) => a.athlete_id === athlete.id && allPastDates.has(a.date)
+                        );
                         
                         let onTime = 0, late = 0, lateJustified = 0, excused = 0, missing = 0, notMarked = 0;
                         
@@ -952,10 +1062,9 @@ export default function AnalyticsDashboard() {
                           }
                         });
 
-                        const attended = onTime + lateJustified;
+                        const attended = onTime + lateJustified + late;
                         const total = allPastDates.size; // Total = all past practice days for this squad
-                        const totalEligible = total - excused;
-                        const rate = totalEligible > 0 ? ((attended / totalEligible) * 100).toFixed(1) : 'N/A';
+                        const rate = total > 0 ? ((attended / total) * 100).toFixed(1) : 'N/A';
 
                         return (
                           <tr key={athlete.id} className="border-b hover:bg-gray-50">
@@ -982,6 +1091,7 @@ export default function AnalyticsDashboard() {
                             <td className="p-2 text-center text-yellow-700">{late + lateJustified}</td>
                             <td className="p-2 text-center text-blue-700">{excused}</td>
                             <td className="p-2 text-center text-red-700">{missing}</td>
+                            <td className="p-2 text-center text-purple-700">{notMarked}</td>
                           </tr>
                         );
                       })}
