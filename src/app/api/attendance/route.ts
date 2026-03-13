@@ -256,11 +256,44 @@ export async function GET(request: NextRequest) {
       query = query.eq('athlete_id', athleteId);
     }
 
-    const { data: attendanceData, error: attendanceError } = await query.order('date', { ascending: false });
+    const isWideScopeQuery = ['coach', 'data-analyzer'].includes(user.user_metadata?.role) && !athleteId;
+    let attendanceData: any[] = [];
 
-    if (attendanceError) {
-      console.error('Error fetching attendance:', attendanceError);
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    if (isWideScopeQuery) {
+      const pageSize = 1000;
+      let from = 0;
+
+      while (true) {
+        const { data: pageData, error: pageError } = await query
+          .order('date', { ascending: false })
+          .range(from, from + pageSize - 1);
+
+        if (pageError) {
+          console.error('Error fetching paged attendance:', pageError);
+          return NextResponse.json({ error: 'Database error' }, { status: 500 });
+        }
+
+        const currentPage = pageData || [];
+        attendanceData.push(...currentPage);
+
+        if (currentPage.length < pageSize) break;
+        from += pageSize;
+
+        // Safety guard against accidental runaway pagination
+        if (from > 100000) {
+          console.warn('Attendance pagination safety limit reached');
+          break;
+        }
+      }
+    } else {
+      const { data, error: attendanceError } = await query.order('date', { ascending: false });
+
+      if (attendanceError) {
+        console.error('Error fetching attendance:', attendanceError);
+        return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      }
+
+      attendanceData = data || [];
     }
 
     // If we need user information, fetch it separately

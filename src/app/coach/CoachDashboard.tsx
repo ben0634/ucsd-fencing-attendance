@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useState, Fragment } from "react";
+import React, { useEffect, useState, Fragment, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabaseClient";
@@ -51,31 +51,190 @@ export default function CoachDashboard() {
   const [quarterReportSortKey, setQuarterReportSortKey] = useState<'name' | 'squad' | 'overallPercentage' | 'overallCoveragePercentage' | 'overallAttended' | 'overallScheduled'>('overallPercentage');
   const [quarterReportSortDirection, setQuarterReportSortDirection] = useState<'asc' | 'desc'>('desc');
   const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const practiceScheduleRequestRef = useRef(0);
+  const [scopedScheduleMaps, setScopedScheduleMaps] = useState<{
+    [key: string]: {
+      scheduleMap: {[key: string]: string[]},
+      customNoPracticeMap: {[key: string]: string[]},
+      customPracticeMap: {[key: string]: string[]},
+    }
+  }>({});
+  const scopedScheduleLoadingRef = useRef<{[key: string]: boolean}>({});
   const router = useRouter();
 
-  const getCurrentQuarterId = () => {
+  const getScopeCacheKey = (scope: string) => `${sessionType}:${scope}`;
+
+  const getQuarterIdForDate = (date: Date) => {
+    const checkDate = new Date(date);
+    checkDate.setHours(12, 0, 0, 0);
+
+    const quarter = quarters.find((q: any) => {
+      const start = new Date(q.start_date + 'T00:00:00');
+      const end = new Date(q.end_date + 'T23:59:59');
+      return checkDate >= start && checkDate <= end;
+    });
+
+    return quarter?.id || null;
+  };
+
+  const getMapsForDate = (date: Date) => {
+    const quarterId = getQuarterIdForDate(date);
+    const scope = quarterId || 'global';
+    const scoped = scopedScheduleMaps[getScopeCacheKey(scope)];
+
+    if (scoped) {
+      return {
+        quarterId,
+        scheduleMap: scoped.scheduleMap,
+        customNoPracticeMap: scoped.customNoPracticeMap,
+        customPracticeMap: scoped.customPracticeMap,
+      };
+    }
+
+    if (!quarterId) {
+      return {
+        quarterId,
+        scheduleMap: {},
+        customNoPracticeMap: {},
+        customPracticeMap: {},
+      };
+    }
+
+    return {
+      quarterId,
+      scheduleMap: practiceSchedules,
+      customNoPracticeMap: customNoPracticeDays,
+      customPracticeMap: customPracticeDays,
+    };
+  };
+
+  const fetchScheduleScope = async (scope: string) => {
+    const cacheKey = getScopeCacheKey(scope);
+    if (scopedScheduleMaps[cacheKey] || scopedScheduleLoadingRef.current[cacheKey]) return;
+
+    scopedScheduleLoadingRef.current[cacheKey] = true;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) return;
+
+      const scopeParam = scope === 'global'
+        ? '&scope=global'
+        : `&quarterId=${encodeURIComponent(scope)}`;
+
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}${scopeParam}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) return;
+      const { schedules } = await response.json();
+
+      const scheduleMap: {[key: string]: string[]} = {};
+      const customNoPracticeMap: {[key: string]: string[]} = {};
+      const customPracticeMap: {[key: string]: string[]} = {};
+
+      schedules?.forEach((schedule: any) => {
+        scheduleMap[schedule.squad_id] = schedule.practice_days || [];
+        customNoPracticeMap[schedule.squad_id] = schedule.custom_no_practice_days || [];
+        customPracticeMap[schedule.squad_id] = schedule.custom_practice_days || [];
+      });
+
+      setScopedScheduleMaps(prev => ({
+        ...prev,
+        [cacheKey]: {
+          scheduleMap,
+          customNoPracticeMap,
+          customPracticeMap,
+        }
+      }));
+    } catch (error) {
+      console.error('Error fetching scoped practice schedules:', error);
+    } finally {
+      scopedScheduleLoadingRef.current[cacheKey] = false;
+    }
+  };
+
+  const getDefaultPracticeQuarterId = () => {
     const today = new Date();
+
     const currentQuarter = quarters.find((q: any) => {
       const start = new Date(q.start_date + 'T00:00:00');
-      const end = new Date(q.end_date + 'T00:00:00');
+      const end = new Date(q.end_date + 'T23:59:59');
       return today >= start && today <= end;
     });
-    return currentQuarter?.id || null;
+
+    if (currentQuarter) {
+      return currentQuarter.id;
+    }
+
+    if (!quarters.length) {
+      return null;
+    }
+
+    const mostRecentlyStarted = quarters
+      .filter((q: any) => new Date(q.start_date + 'T00:00:00') <= today)
+      .sort((a: any, b: any) =>
+        new Date(b.start_date + 'T00:00:00').getTime() - new Date(a.start_date + 'T00:00:00').getTime()
+      )[0];
+
+    return (mostRecentlyStarted || quarters[0])?.id || null;
+  };
+
+  const isDateWithinAnyQuarter = (date: Date) => {
+    if (!quarters.length) return true;
+
+    const checkDate = new Date(date);
+    checkDate.setHours(12, 0, 0, 0);
+
+    return quarters.some((q: any) => {
+      const start = new Date(q.start_date + 'T00:00:00');
+      const end = new Date(q.end_date + 'T23:59:59');
+      return checkDate >= start && checkDate <= end;
+    });
   };
 
   // When sessionType toggles, refresh schedules for selected quarter scope
   useEffect(() => {
     if (!user) return;
     fetchPracticeSchedules();
-  }, [sessionType, selectedPracticeQuarterScope, user]);
+  }, [sessionType, selectedPracticeQuarterScope, user, viewMode, analyticsViewMode, selectedAnalyticsQuarter, selectedMonth, selectedYear, currentWeekOffset]);
+
+  useEffect(() => {
+    if (!user || quarters.length === 0) return;
+
+    const visibleDates = viewMode === 'analytics' ? getMonthDays() : getWeekDates();
+    const requiredScopes = new Set<string>();
+
+    visibleDates.forEach((date: Date) => {
+      requiredScopes.add(getQuarterIdForDate(date) || 'global');
+    });
+
+    requiredScopes.forEach((scope) => {
+      fetchScheduleScope(scope);
+    });
+  }, [user, quarters, sessionType, viewMode, analyticsViewMode, selectedAnalyticsQuarter, selectedMonth, selectedYear, currentWeekOffset]);
 
   useEffect(() => {
     if (!quarters.length) return;
-    const currentQuarterId = getCurrentQuarterId();
+    const currentQuarterId = getDefaultPracticeQuarterId();
     if (selectedPracticeQuarterScope === 'global' && currentQuarterId) {
       setSelectedPracticeQuarterScope(currentQuarterId);
     }
   }, [quarters]);
+
+  useEffect(() => {
+    if (viewMode !== 'practice') return;
+    if (!quarters.length) return;
+    if (selectedPracticeQuarterScope !== 'global') return;
+
+    const defaultQuarterId = getDefaultPracticeQuarterId();
+    if (defaultQuarterId) {
+      setSelectedPracticeQuarterScope(defaultQuarterId);
+    }
+  }, [viewMode, quarters, selectedPracticeQuarterScope]);
 
   // Get current week's dates with offset
   const getWeekDates = () => {
@@ -314,25 +473,31 @@ export default function CoachDashboard() {
   const hasAnalyticsPractice = (squadId: string, date: Date) => {
     const dateString = getLocalDateString(date);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    const { quarterId, scheduleMap, customNoPracticeMap, customPracticeMap } = getMapsForDate(date);
     
     // Check custom no-practice days first
-    const squadCustomNoPractice = customNoPracticeDays[squadId] || [];
-    const allTeamCustomNoPractice = customNoPracticeDays['all'] || [];
+    const squadCustomNoPractice = customNoPracticeMap[squadId] || [];
+    const allTeamCustomNoPractice = customNoPracticeMap['all'] || [];
     
     if (squadCustomNoPractice.includes(dateString) || allTeamCustomNoPractice.includes(dateString)) {
       return false;
     }
     
     // Check custom practice days
-    const squadCustomPractice = customPracticeDays[squadId] || [];
-    const allTeamCustomPractice = customPracticeDays['all'] || [];
+    const squadCustomPractice = customPracticeMap[squadId] || [];
+    const allTeamCustomPractice = customPracticeMap['all'] || [];
     
     if (squadCustomPractice.includes(dateString) || allTeamCustomPractice.includes(dateString)) {
       return true;
     }
+
+    // Outside all quarter ranges, regular schedule does not apply
+    if (!quarterId) {
+      return false;
+    }
     
     // Fall back to regular schedule
-    const squadSchedule = practiceSchedules[squadId] || [];
+    const squadSchedule = scheduleMap[squadId] || [];
     return squadSchedule.includes(dayName);
   };
 
@@ -340,25 +505,31 @@ export default function CoachDashboard() {
   const hasPractice = (squadId: string, date: Date) => {
     const dateString = getLocalDateString(date);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    const { quarterId, scheduleMap, customNoPracticeMap, customPracticeMap } = getMapsForDate(date);
     
     // Check custom no-practice days first
-    const squadCustomNoPractice = customNoPracticeDays[squadId] || [];
-    const allTeamCustomNoPractice = customNoPracticeDays['all'] || [];
+    const squadCustomNoPractice = customNoPracticeMap[squadId] || [];
+    const allTeamCustomNoPractice = customNoPracticeMap['all'] || [];
     
     if (squadCustomNoPractice.includes(dateString) || allTeamCustomNoPractice.includes(dateString)) {
       return false;
     }
     
     // Check custom practice days
-    const squadCustomPractice = customPracticeDays[squadId] || [];
-    const allTeamCustomPractice = customPracticeDays['all'] || [];
+    const squadCustomPractice = customPracticeMap[squadId] || [];
+    const allTeamCustomPractice = customPracticeMap['all'] || [];
     
     if (squadCustomPractice.includes(dateString) || allTeamCustomPractice.includes(dateString)) {
       return true;
     }
+
+    // Outside all quarter ranges, regular schedule does not apply
+    if (!quarterId) {
+      return false;
+    }
     
     // Fall back to regular schedule
-    const squadSchedule = practiceSchedules[squadId] || [];
+    const squadSchedule = scheduleMap[squadId] || [];
     return squadSchedule.includes(dayName);
   };
 
@@ -637,6 +808,8 @@ export default function CoachDashboard() {
 
   // Fetch practice schedules
   const fetchPracticeSchedules = async () => {
+    const requestId = ++practiceScheduleRequestRef.current;
+
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
@@ -645,11 +818,27 @@ export default function CoachDashboard() {
         console.error('No access token for fetching schedules');
         return;
       }
-      const quarterParam = selectedPracticeQuarterScope !== 'global'
-        ? `&quarterId=${encodeURIComponent(selectedPracticeQuarterScope)}`
-        : '';
+      let quarterParam = '';
+      let referenceDateParam = '';
 
-      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}${quarterParam}`, {
+      if (viewMode === 'practice') {
+        quarterParam = selectedPracticeQuarterScope !== 'global'
+          ? `&quarterId=${encodeURIComponent(selectedPracticeQuarterScope)}`
+          : '';
+        referenceDateParam = selectedPracticeQuarterScope === 'global'
+          ? `&date=${encodeURIComponent(getLocalDateString(getWeekDates()[0]))}`
+          : '';
+      } else if (viewMode === 'analytics') {
+        if (analyticsViewMode === 'quarter' && selectedAnalyticsQuarter) {
+          quarterParam = `&quarterId=${encodeURIComponent(selectedAnalyticsQuarter)}`;
+        } else {
+          referenceDateParam = `&date=${encodeURIComponent(getLocalDateString(new Date(selectedYear, selectedMonth, 1)))}`;
+        }
+      } else {
+        referenceDateParam = `&date=${encodeURIComponent(getLocalDateString(getWeekDates()[0]))}`;
+      }
+
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}${quarterParam}${referenceDateParam}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -657,7 +846,8 @@ export default function CoachDashboard() {
       });
 
       if (response.ok) {
-        const { schedules } = await response.json();
+        const { schedules, quarterId } = await response.json();
+        if (requestId !== practiceScheduleRequestRef.current) return;
         
         const scheduleMap: {[key: string]: string[]} = {};
         const customNoPracticeMap: {[key: string]: string[]} = {};
@@ -676,6 +866,22 @@ export default function CoachDashboard() {
         setPracticeScheduleCache(prev => ({ ...prev, [sessionType]: scheduleMap }));
         setCustomNoPracticeDaysCache(prev => ({ ...prev, [sessionType]: customNoPracticeMap }));
         setCustomPracticeDaysCache(prev => ({ ...prev, [sessionType]: customPracticeMap }));
+
+        const responseScope =
+          (viewMode === 'practice' && selectedPracticeQuarterScope !== 'global')
+            ? selectedPracticeQuarterScope
+            : ((viewMode === 'analytics' && analyticsViewMode === 'quarter' && selectedAnalyticsQuarter)
+              ? selectedAnalyticsQuarter
+              : (quarterId || 'global'));
+
+        setScopedScheduleMaps(prev => ({
+          ...prev,
+          [getScopeCacheKey(responseScope)]: {
+            scheduleMap,
+            customNoPracticeMap,
+            customPracticeMap,
+          }
+        }));
       } else {
         console.error('Failed to fetch schedules:', response.status, await response.text());
       }
@@ -919,6 +1125,45 @@ export default function CoachDashboard() {
     
     const quarter = quarters.find(q => q.id === selectedAnalyticsQuarter);
     if (!quarter) return;
+
+    const reportRow = quarterFinalReport?.rows?.find((row: any) => row.athleteId === memberId);
+    if (reportRow) {
+      setSelectedAthleteStats({
+        name: memberName,
+        quarterName: quarter.name,
+        overall: {
+          attended: reportRow.overallAttended,
+          scheduled: reportRow.overallScheduled,
+          percentage: reportRow.overallPercentage,
+          marked: reportRow.overallMarked,
+          coveragePercentage: reportRow.overallCoveragePercentage,
+        },
+        practice: {
+          attended: reportRow.practiceAttended,
+          scheduled: reportRow.practiceScheduled,
+          percentage: reportRow.practicePercentage,
+          marked: reportRow.practiceMarked,
+          coveragePercentage: reportRow.practiceCoveragePercentage,
+        },
+        lift: {
+          attended: reportRow.liftAttended,
+          scheduled: reportRow.liftScheduled,
+          percentage: reportRow.liftPercentage,
+          marked: reportRow.liftMarked,
+          coveragePercentage: reportRow.liftCoveragePercentage,
+        },
+        counts: reportRow.counts || {
+          onTime: 0,
+          lateJustified: 0,
+          late: 0,
+          excused: 0,
+          missing: 0,
+          notMarked: 0,
+        },
+      });
+      setShowAthleteStatsModal(true);
+      return;
+    }
     
     // Only count practices up to today
     const today = new Date();
@@ -943,24 +1188,45 @@ export default function CoachDashboard() {
       }
     });
     
-    // Attended = on-time + late-justified
-    // Total eligible = total practices - excused
-    const attended = onTime + lateJustified;
-    const totalEligible = totalPractices - excused;
-    const percentage = totalEligible > 0 ? Math.round((attended / totalEligible) * 100) : 0;
+    // Attended = on-time + late-justified + late
+    // Denominator stays as scheduled practices
+    const attended = onTime + lateJustified + late;
+    const percentage = totalPractices > 0 ? Math.round((attended / totalPractices) * 100) : 0;
     
+    const fallbackSection = {
+      attended,
+      scheduled: totalPractices,
+      percentage,
+      marked: totalPractices - notMarked,
+      coveragePercentage: totalPractices > 0 ? Math.round(((totalPractices - notMarked) / totalPractices) * 100) : 0,
+    };
+
     setSelectedAthleteStats({
       name: memberName,
       quarterName: quarter.name,
-      totalPractices,
-      attended,
-      percentage,
-      onTime,
-      late,
-      lateJustified,
-      excused,
-      missing,
-      notMarked
+      overall: fallbackSection,
+      practice: sessionType === 'practice' ? fallbackSection : {
+        attended: 0,
+        scheduled: 0,
+        percentage: 0,
+        marked: 0,
+        coveragePercentage: 0,
+      },
+      lift: sessionType === 'lift' ? fallbackSection : {
+        attended: 0,
+        scheduled: 0,
+        percentage: 0,
+        marked: 0,
+        coveragePercentage: 0,
+      },
+      counts: {
+        onTime,
+        late,
+        lateJustified,
+        excused,
+        missing,
+        notMarked
+      }
     });
     setShowAthleteStatsModal(true);
   };
@@ -1140,8 +1406,8 @@ export default function CoachDashboard() {
             0
           );
 
-          const practiceAttended = practiceCounts.onTime + practiceCounts.lateJustified;
-          const liftAttended = liftCounts.onTime + liftCounts.lateJustified;
+          const practiceAttended = practiceCounts.onTime + practiceCounts.lateJustified + practiceCounts.late;
+          const liftAttended = liftCounts.onTime + liftCounts.lateJustified + liftCounts.late;
           const overallScheduled = practiceScheduled + liftScheduled;
           const overallAttended = practiceAttended + liftAttended;
           const overallPercentage = overallScheduled > 0 ? Math.round((overallAttended / overallScheduled) * 100) : 0;
@@ -2505,7 +2771,7 @@ export default function CoachDashboard() {
                       </div>
 
                       <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
-                        <h4 className="font-semibold text-gray-900 mb-2 text-sm">Needs Support</h4>
+                        <h4 className="font-semibold text-gray-900 mb-2 text-sm">Lowest Attendance</h4>
                         <div className="space-y-1">
                           {quarterFinalReport.bottomRankings.map((row: any) => (
                             <div key={`bottom-${row.athleteId}`} className="flex items-center justify-between text-sm">
@@ -2849,52 +3115,66 @@ export default function CoachDashboard() {
             <div className="mb-3">
               <h4 className="text-xs font-medium text-gray-600 mb-2">{selectedAthleteStats.quarterName}</h4>
               
-              {/* Percentage Card */}
+              {/* Overall Card */}
               <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3 mb-3">
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-blue-600 mb-1">{selectedAthleteStats.percentage}%</div>
-                  <div className="text-xs text-gray-600">Attendance Rate</div>
+                  <div className="text-3xl font-bold text-blue-600 mb-1">{selectedAthleteStats.overall?.percentage ?? 0}%</div>
+                  <div className="text-xs text-gray-600">Overall Attendance Rate</div>
                 </div>
                 <div className="mt-2 bg-gray-200 rounded-full h-1.5 overflow-hidden">
                   <div 
                     className="bg-blue-600 h-full transition-all duration-300"
-                    style={{ width: `${selectedAthleteStats.percentage}%` }}
+                    style={{ width: `${selectedAthleteStats.overall?.percentage ?? 0}%` }}
                   ></div>
+                </div>
+              </div>
+
+              {/* Practice / Lift Sections */}
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div className="bg-emerald-50 rounded-lg p-2 border border-emerald-100">
+                  <div className="text-[10px] font-semibold text-emerald-700 mb-1">Practice</div>
+                  <div className="text-lg font-bold text-emerald-700">{selectedAthleteStats.practice?.percentage ?? 0}%</div>
+                  <div className="text-[10px] text-gray-600">{selectedAthleteStats.practice?.attended ?? 0} / {selectedAthleteStats.practice?.scheduled ?? 0} attended</div>
+                </div>
+                <div className="bg-indigo-50 rounded-lg p-2 border border-indigo-100">
+                  <div className="text-[10px] font-semibold text-indigo-700 mb-1">Lift</div>
+                  <div className="text-lg font-bold text-indigo-700">{selectedAthleteStats.lift?.percentage ?? 0}%</div>
+                  <div className="text-[10px] text-gray-600">{selectedAthleteStats.lift?.attended ?? 0} / {selectedAthleteStats.lift?.scheduled ?? 0} attended</div>
                 </div>
               </div>
               
               {/* Stats Grid */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-gray-50 rounded-lg p-2">
-                  <div className="text-xl font-bold text-gray-900">{selectedAthleteStats.attended}</div>
-                  <div className="text-[10px] text-gray-600">Attended</div>
+                  <div className="text-xl font-bold text-gray-900">{selectedAthleteStats.overall?.attended ?? 0}</div>
+                  <div className="text-[10px] text-gray-600">Overall Attended</div>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-2">
-                  <div className="text-xl font-bold text-gray-900">{selectedAthleteStats.totalPractices}</div>
-                  <div className="text-[10px] text-gray-600">Total {sessionType === 'practice' ? 'Practices' : 'Lifts'}</div>
+                  <div className="text-xl font-bold text-gray-900">{selectedAthleteStats.overall?.scheduled ?? 0}</div>
+                  <div className="text-[10px] text-gray-600">Overall Scheduled</div>
                 </div>
                 <div className="bg-green-50 rounded-lg p-2">
-                  <div className="text-xl font-bold text-green-600">{selectedAthleteStats.onTime}</div>
+                  <div className="text-xl font-bold text-green-600">{selectedAthleteStats.counts?.onTime ?? 0}</div>
                   <div className="text-[10px] text-gray-600">On Time</div>
                 </div>
                 <div className="bg-green-50 rounded-lg p-2">
-                  <div className="text-xl font-bold text-green-600">{selectedAthleteStats.lateJustified}</div>
+                  <div className="text-xl font-bold text-green-600">{selectedAthleteStats.counts?.lateJustified ?? 0}</div>
                   <div className="text-[10px] text-gray-600">Late (Justified)</div>
                 </div>
                 <div className="bg-yellow-50 rounded-lg p-2">
-                  <div className="text-xl font-bold text-yellow-600">{selectedAthleteStats.late}</div>
+                  <div className="text-xl font-bold text-yellow-600">{selectedAthleteStats.counts?.late ?? 0}</div>
                   <div className="text-[10px] text-gray-600">Late</div>
                 </div>
                 <div className="bg-blue-50 rounded-lg p-2">
-                  <div className="text-xl font-bold text-blue-600">{selectedAthleteStats.excused}</div>
+                  <div className="text-xl font-bold text-blue-600">{selectedAthleteStats.counts?.excused ?? 0}</div>
                   <div className="text-[10px] text-gray-600">Excused</div>
                 </div>
                 <div className="bg-red-50 rounded-lg p-2">
-                  <div className="text-xl font-bold text-red-600">{selectedAthleteStats.missing}</div>
+                  <div className="text-xl font-bold text-red-600">{selectedAthleteStats.counts?.missing ?? 0}</div>
                   <div className="text-[10px] text-gray-600">Missing</div>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-2">
-                  <div className="text-xl font-bold text-gray-600">{selectedAthleteStats.notMarked}</div>
+                  <div className="text-xl font-bold text-gray-600">{selectedAthleteStats.counts?.notMarked ?? 0}</div>
                   <div className="text-[10px] text-gray-600">Not Marked</div>
                 </div>
               </div>

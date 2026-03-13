@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabaseClient";
@@ -27,6 +27,16 @@ export default function AthleteDashboard() {
   const [quarterStats, setQuarterStats] = useState<{attended: number, total: number, percentage: number} | null>(null);
   const [finalQuarterReport, setFinalQuarterReport] = useState<any | null>(null);
   const [loadingFinalQuarterReport, setLoadingFinalQuarterReport] = useState(false);
+  const finalQuarterReportRef = useRef<any | null>(null);
+  const practiceScheduleRequestRef = useRef(0);
+  const [scopedScheduleMaps, setScopedScheduleMaps] = useState<{
+    [key: string]: {
+      scheduleMap: {[key: string]: string[]},
+      customNoPracticeMap: {[key: string]: string[]},
+      customPracticeMap: {[key: string]: string[]},
+    }
+  }>({});
+  const scopedScheduleLoadingRef = useRef<{[key: string]: boolean}>({});
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth()); // 0-11
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
@@ -99,6 +109,101 @@ export default function AthleteDashboard() {
     setCurrentWeekOffset(currentWeekOffset + 1);
   };
 
+  const getScopeCacheKey = (scope: string) => `${sessionType}:${scope}`;
+
+  const getQuarterIdForDate = (date: Date) => {
+    const checkDate = new Date(date);
+    checkDate.setHours(12, 0, 0, 0);
+
+    const quarter = quarters.find((q: any) => {
+      const start = new Date(q.start_date + 'T00:00:00');
+      const end = new Date(q.end_date + 'T23:59:59');
+      return checkDate >= start && checkDate <= end;
+    });
+
+    return quarter?.id || null;
+  };
+
+  const getMapsForDate = (date: Date) => {
+    const quarterId = getQuarterIdForDate(date);
+    const scope = quarterId || 'global';
+    const scoped = scopedScheduleMaps[getScopeCacheKey(scope)];
+
+    if (scoped) {
+      return {
+        quarterId,
+        scheduleMap: scoped.scheduleMap,
+        customNoPracticeMap: scoped.customNoPracticeMap,
+        customPracticeMap: scoped.customPracticeMap,
+      };
+    }
+
+    if (!quarterId) {
+      return {
+        quarterId,
+        scheduleMap: {},
+        customNoPracticeMap: {},
+        customPracticeMap: {},
+      };
+    }
+
+    return {
+      quarterId,
+      scheduleMap: practiceSchedules,
+      customNoPracticeMap: customNoPracticeDays,
+      customPracticeMap: customPracticeDays,
+    };
+  };
+
+  const fetchScheduleScope = async (scope: string) => {
+    const cacheKey = getScopeCacheKey(scope);
+    if (scopedScheduleMaps[cacheKey] || scopedScheduleLoadingRef.current[cacheKey]) return;
+
+    scopedScheduleLoadingRef.current[cacheKey] = true;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) return;
+
+      const scopeParam = scope === 'global'
+        ? '&scope=global'
+        : `&quarterId=${encodeURIComponent(scope)}`;
+
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}${scopeParam}`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) return;
+      const { schedules } = await response.json();
+
+      const scheduleMap: {[key: string]: string[]} = {};
+      const customNoPracticeMap: {[key: string]: string[]} = {};
+      const customPracticeMap: {[key: string]: string[]} = {};
+
+      schedules?.forEach((schedule: any) => {
+        scheduleMap[schedule.squad_id] = schedule.practice_days || [];
+        customNoPracticeMap[schedule.squad_id] = schedule.custom_no_practice_days || [];
+        customPracticeMap[schedule.squad_id] = schedule.custom_practice_days || [];
+      });
+
+      setScopedScheduleMaps(prev => ({
+        ...prev,
+        [cacheKey]: {
+          scheduleMap,
+          customNoPracticeMap,
+          customPracticeMap,
+        }
+      }));
+    } catch (error) {
+      console.error('Error fetching scoped practice schedules:', error);
+    } finally {
+      scopedScheduleLoadingRef.current[cacheKey] = false;
+    }
+  };
+
   const goToCurrentWeek = () => {
     setCurrentWeekOffset(0);
   };
@@ -139,13 +244,18 @@ export default function AthleteDashboard() {
   };
 
   const fetchPracticeSchedules = async () => {
+    const requestId = ++practiceScheduleRequestRef.current;
+
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
       
       if (!accessToken) return;
+      const referenceDate = currentWeekOffset !== 0
+        ? getLocalDateString(getWeekDates()[0])
+        : getLocalDateString(new Date(calendarYear, calendarMonth, 1));
       // For now we reuse the same endpoint; in lift mode backend will later filter by sessionType
-      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}`, {
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}&date=${encodeURIComponent(referenceDate)}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -153,7 +263,9 @@ export default function AthleteDashboard() {
       });
 
       if (response.ok) {
-        const { schedules } = await response.json();
+        const { schedules, quarterId } = await response.json();
+        if (requestId !== practiceScheduleRequestRef.current) return;
+
         const scheduleMap: {[key: string]: string[]} = {};
         const customNoPracticeMap: {[key: string]: string[]} = {};
         const customPracticeMap: {[key: string]: string[]} = {};
@@ -171,6 +283,16 @@ export default function AthleteDashboard() {
         setPracticeScheduleCache(prev => ({ ...prev, [sessionType]: scheduleMap }));
         setCustomNoPracticeDaysCache(prev => ({ ...prev, [sessionType]: customNoPracticeMap }));
         setCustomPracticeDaysCache(prev => ({ ...prev, [sessionType]: customPracticeMap }));
+
+        const responseScope = quarterId || 'global';
+        setScopedScheduleMaps(prev => ({
+          ...prev,
+          [getScopeCacheKey(responseScope)]: {
+            scheduleMap,
+            customNoPracticeMap,
+            customPracticeMap,
+          }
+        }));
       }
     } catch (error) {
       console.error('Error fetching practice schedules:', error);
@@ -189,6 +311,19 @@ export default function AthleteDashboard() {
     return record?.notes || null;
   };
 
+  const isDateWithinAnyQuarter = (date: Date) => {
+    if (!quarters.length) return true;
+
+    const checkDate = new Date(date);
+    checkDate.setHours(12, 0, 0, 0);
+
+    return quarters.some((q: any) => {
+      const start = new Date(q.start_date + 'T00:00:00');
+      const end = new Date(q.end_date + 'T23:59:59');
+      return checkDate >= start && checkDate <= end;
+    });
+  };
+
   const hasPractice = (date: Date) => {
     if (!user) return true; // Default to showing practice if we don't know
 
@@ -202,25 +337,31 @@ export default function AthleteDashboard() {
     const dateString = getLocalDateString(date);
     const dayName = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
     const squadId = `${user.user_metadata?.gender}_${user.user_metadata?.weapon}`;
+    const { quarterId, scheduleMap, customNoPracticeMap, customPracticeMap } = getMapsForDate(date);
     
     // Check custom no-practice days first
-    const squadCustomNoPractice = customNoPracticeDays[squadId] || [];
-    const allTeamCustomNoPractice = customNoPracticeDays['all'] || [];
+    const squadCustomNoPractice = customNoPracticeMap[squadId] || [];
+    const allTeamCustomNoPractice = customNoPracticeMap['all'] || [];
     
     if (squadCustomNoPractice.includes(dateString) || allTeamCustomNoPractice.includes(dateString)) {
       return false;
     }
     
     // Check custom practice days
-    const squadCustomPractice = customPracticeDays[squadId] || [];
-    const allTeamCustomPractice = customPracticeDays['all'] || [];
+    const squadCustomPractice = customPracticeMap[squadId] || [];
+    const allTeamCustomPractice = customPracticeMap['all'] || [];
     
     if (squadCustomPractice.includes(dateString) || allTeamCustomPractice.includes(dateString)) {
       return true;
     }
+
+    // Outside all quarter ranges, regular schedule does not apply
+    if (!quarterId) {
+      return false;
+    }
     
     // Fall back to regular schedule
-    const squadSchedule = practiceSchedules[squadId] || [];
+    const squadSchedule = scheduleMap[squadId] || [];
     return squadSchedule.includes(dayName);
   };
 
@@ -384,8 +525,8 @@ export default function AthleteDashboard() {
         0
       );
 
-      const practiceAttended = practiceCounts.onTime + practiceCounts.lateJustified;
-      const liftAttended = liftCounts.onTime + liftCounts.lateJustified;
+      const practiceAttended = practiceCounts.onTime + practiceCounts.lateJustified + practiceCounts.late;
+      const liftAttended = liftCounts.onTime + liftCounts.lateJustified + liftCounts.late;
       const totalScheduled = practiceScheduled + liftScheduled;
       const totalAttended = practiceAttended + liftAttended;
       const totalPercentage = totalScheduled > 0 ? Math.round((totalAttended / totalScheduled) * 100) : 0;
@@ -472,15 +613,22 @@ export default function AthleteDashboard() {
         const today = new Date();
         const currentQuarter = (allQuarters || []).find((q: any) => {
           const start = new Date(q.start_date + 'T00:00:00');
-          const end = new Date(q.end_date + 'T00:00:00');
+          const end = new Date(q.end_date + 'T23:59:59');
           return today >= start && today <= end;
         });
         
         if (currentQuarter) {
           setSelectedQuarter(currentQuarter.id);
         } else if (allQuarters && allQuarters.length > 0) {
-          // Select most recent quarter if no current quarter
-          setSelectedQuarter(allQuarters[allQuarters.length - 1].id);
+          // Fall back to the most recently started quarter before today,
+          // or the first upcoming quarter if none have started yet
+          const mostRecentlyStarted = allQuarters
+            .filter((q: any) => new Date(q.start_date + 'T00:00:00') <= today)
+            .sort((a: any, b: any) =>
+              new Date(b.start_date + 'T00:00:00').getTime() - new Date(a.start_date + 'T00:00:00').getTime()
+            )[0];
+          const fallback = mostRecentlyStarted || allQuarters[0];
+          setSelectedQuarter(fallback.id);
         }
       }
     } catch (error) {
@@ -545,23 +693,49 @@ export default function AthleteDashboard() {
       return;
     }
 
-    const response = await fetch(
-      `/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
+    const [attendanceResponse, scheduleResponse] = await Promise.all([
+      fetch(
+        `/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
         }
-      }
-    );
+      ),
+      fetch(
+        `/api/practice-schedule?sessionType=${sessionType}&quarterId=${encodeURIComponent(selectedQuarter)}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+    ]);
 
-    if (!response.ok) {
+    if (!attendanceResponse.ok || !scheduleResponse.ok) {
       setQuarterStats(null);
       return;
     }
 
-    const { attendance: quarterAttendanceData } = await response.json();
+    const [{ attendance: quarterAttendanceData }, { schedules: quarterSchedulesData }] = await Promise.all([
+      attendanceResponse.json(),
+      scheduleResponse.json()
+    ]);
+
+    const scheduleMap: {[key: string]: string[]} = {};
+    const customNoPracticeMap: {[key: string]: string[]} = {};
+    const customPracticeMap: {[key: string]: string[]} = {};
+
+    (quarterSchedulesData || []).forEach((schedule: any) => {
+      scheduleMap[schedule.squad_id] = schedule.practice_days || [];
+      customNoPracticeMap[schedule.squad_id] = schedule.custom_no_practice_days || [];
+      customPracticeMap[schedule.squad_id] = schedule.custom_practice_days || [];
+    });
+
     const athleteAttendance = quarterAttendanceData?.filter((a: any) => a.athlete_id === user.id) || [];
+    const attendanceByDate = new Map<string, any>(athleteAttendance.map((a: any) => [a.date, a]));
 
     // Get all dates in quarter range, but only up to today
     const start = new Date(startDate + 'T00:00:00');
@@ -579,27 +753,28 @@ export default function AthleteDashboard() {
     for (let d = new Date(start); d <= effectiveEnd; d.setDate(d.getDate() + 1)) {
       const currentDate = new Date(d);
       
-      if (hasPractice(currentDate)) {
+      if (hasPracticeFromMaps(currentDate, squadId, scheduleMap, customNoPracticeMap, customPracticeMap)) {
         totalPractices++;
         
         const dateString = getLocalDateString(currentDate);
-        const attendance = athleteAttendance.find(
-          (a: any) => a.date === dateString
-        );
+        const attendance = attendanceByDate.get(dateString);
         
-        // Count as attended if status is on-time or late-justified
-        // Excused absences are removed from denominator (don't count as practice to attend)
-        if (attendance?.status === 'excused') {
-          totalPractices--; // Remove from denominator
-        } else if (attendance?.status === 'on-time' || attendance?.status === 'late-justified') {
+        // Count as attended if status is on-time, late-justified, or late
+        // Keep denominator aligned with Final Quarter Report schedule totals
+        if (attendance?.status === 'on-time' || attendance?.status === 'late-justified' || attendance?.status === 'late') {
           attended++;
         }
-        // Late and missing don't count as attended but stay in denominator
+        // Missing and excused don't count as attended but stay in denominator
       }
     }
 
     const percentage = totalPractices > 0 ? Math.round((attended / totalPractices) * 100) : 0;
     
+    // Avoid overwriting the canonical quarter-scoped values once final report is ready
+    if (finalQuarterReportRef.current?.byType?.[sessionType]) {
+      return;
+    }
+
     setQuarterStats({
       attended,
       total: totalPractices,
@@ -638,16 +813,45 @@ export default function AthleteDashboard() {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (!user || quarters.length === 0) return;
+
+    const requiredScopes = new Set<string>();
+
+    weekDates.forEach((date: Date) => {
+      requiredScopes.add(getQuarterIdForDate(date) || 'global');
+    });
+
+    const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(calendarYear, calendarMonth, day);
+      requiredScopes.add(getQuarterIdForDate(date) || 'global');
+    }
+
+    requiredScopes.forEach((scope) => {
+      fetchScheduleScope(scope);
+    });
+  }, [user, quarters, sessionType, currentWeekOffset, calendarMonth, calendarYear]);
+
   // Calculate quarter stats when selection changes or attendance data updates
   useEffect(() => {
+    // Prefer quarter-scoped stats from final report when available
+    if (finalQuarterReport?.byType?.[sessionType]) {
+      return;
+    }
+
     if (selectedQuarter && practiceSchedules) {
       calculateQuarterStats();
     }
-  }, [selectedQuarter, currentWeekOffset, practiceSchedules, customNoPracticeDays, customPracticeDays, sessionType]);
+  }, [selectedQuarter, currentWeekOffset, practiceSchedules, customNoPracticeDays, customPracticeDays, sessionType, finalQuarterReport]);
 
   useEffect(() => {
     calculateFinalQuarterReport();
   }, [selectedQuarter, user, quarters]);
+
+  useEffect(() => {
+    finalQuarterReportRef.current = finalQuarterReport;
+  }, [finalQuarterReport]);
 
   useEffect(() => {
     if (!finalQuarterReport) return;

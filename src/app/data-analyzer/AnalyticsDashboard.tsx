@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState, Fragment, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { User } from "@supabase/supabase-js";
 import { supabase } from "../../lib/supabaseClient";
@@ -49,6 +49,7 @@ export default function AnalyticsDashboard() {
   const [practiceSchedules, setPracticeSchedules] = useState<{[key: string]: string[]}>({});
   const [customNoPracticeDays, setCustomNoPracticeDays] = useState<{[key: string]: string[]}>({});
   const [customPracticeDays, setCustomPracticeDays] = useState<{[key: string]: string[]}>({});
+  const practiceScheduleRequestRef = useRef(0);
   const router = useRouter();
 
   // Persist session type
@@ -116,13 +117,22 @@ export default function AnalyticsDashboard() {
 
   // Fetch practice schedules
   const fetchPracticeSchedules = async () => {
+    const requestId = ++practiceScheduleRequestRef.current;
+
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
       
       if (!accessToken) return;
 
-      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}`, {
+      const quarterParam = selectedCalendarQuarter
+        ? `&quarterId=${encodeURIComponent(selectedCalendarQuarter)}`
+        : '';
+      const dateParam = !selectedCalendarQuarter
+        ? `&date=${encodeURIComponent(getLocalDateString(new Date(selectedYear, selectedMonth, 1)))}`
+        : '';
+
+      const response = await fetch(`/api/practice-schedule?sessionType=${sessionType}${quarterParam}${dateParam}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
@@ -131,6 +141,7 @@ export default function AnalyticsDashboard() {
 
       if (response.ok) {
         const { schedules } = await response.json();
+        if (requestId !== practiceScheduleRequestRef.current) return;
         
         const scheduleMap: {[key: string]: string[]} = {};
         const customNoPracticeMap: {[key: string]: string[]} = {};
@@ -224,6 +235,12 @@ export default function AnalyticsDashboard() {
       fetchPracticeSchedules();
     }
   }, [sessionType]);
+
+  useEffect(() => {
+    if (user) {
+      fetchPracticeSchedules();
+    }
+  }, [user, selectedCalendarQuarter, selectedMonth, selectedYear]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -407,6 +424,19 @@ export default function AnalyticsDashboard() {
     }
   };
 
+  const isDateWithinAnyQuarter = (date: Date) => {
+    if (!quarters.length) return true;
+
+    const checkDate = new Date(date);
+    checkDate.setHours(12, 0, 0, 0);
+
+    return quarters.some((q: any) => {
+      const start = new Date(q.start_date + 'T00:00:00');
+      const end = new Date(q.end_date + 'T23:59:59');
+      return checkDate >= start && checkDate <= end;
+    });
+  };
+
   // Check if a date is a practice day for a squad based on practice schedule
   const hasAnalyticsPractice = (squadId: string, date: Date) => {
     const dateString = getLocalDateString(date);
@@ -426,6 +456,11 @@ export default function AnalyticsDashboard() {
     
     if (squadCustomPractice.includes(dateString) || allTeamCustomPractice.includes(dateString)) {
       return true;
+    }
+
+    // Outside all quarter ranges, regular schedule does not apply
+    if (!isDateWithinAnyQuarter(date)) {
+      return false;
     }
     
     // Fall back to regular schedule

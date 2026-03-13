@@ -14,15 +14,19 @@ function normalizeSessionType(raw: any): SessionType {
   return (VALID_SESSION_TYPES as readonly string[]).includes(raw) ? raw as SessionType : 'practice';
 }
 
-async function resolveCurrentQuarterId() {
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+async function resolveQuarterIdByDate(dateStr?: string | null) {
+  let effectiveDate = dateStr;
+
+  if (!effectiveDate) {
+    const today = new Date();
+    effectiveDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  }
 
   const { data: quarter, error } = await supabaseAdmin
     .from('quarters')
     .select('id')
-    .lte('start_date', todayStr)
-    .gte('end_date', todayStr)
+    .lte('start_date', effectiveDate)
+    .gte('end_date', effectiveDate)
     .order('start_date', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -60,7 +64,12 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const sessionType = normalizeSessionType(url.searchParams.get('sessionType'));
     const requestedQuarterId = url.searchParams.get('quarterId');
-    const effectiveQuarterId = requestedQuarterId || await resolveCurrentQuarterId();
+    const requestedDate = url.searchParams.get('date');
+    const requestedScope = url.searchParams.get('scope');
+    const forceGlobalScope = requestedScope === 'global';
+    const effectiveQuarterId = forceGlobalScope
+      ? null
+      : (requestedQuarterId || await resolveQuarterIdByDate(requestedDate));
 
     const { data: globalSchedules, error: globalError } = await supabaseAdmin
       .from('practice_schedules')
@@ -89,7 +98,7 @@ export async function GET(request: Request) {
     }
 
     let quarterSchedules: any[] = [];
-    if (effectiveQuarterId) {
+    if (!forceGlobalScope && effectiveQuarterId) {
       const { data: scopedSchedules, error: scopedError } = await supabaseAdmin
         .from('practice_schedules')
         .select('*')
