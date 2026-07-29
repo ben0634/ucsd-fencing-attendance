@@ -9,14 +9,26 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
     steps:
       - name: Ping deployment to keep Supabase active
         id: ping
         run: |
-          echo "Pinging deployment to prevent Supabase from pausing..."
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" https://ucsdfencing.vercel.app/)
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "Missing Supabase secrets: NEXT_PUBLIC_SUPABASE_URL and/or NEXT_PUBLIC_SUPABASE_ANON_KEY"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "Pinging Supabase REST API to prevent the database from pausing..."
+          RESPONSE=$(curl -sS -o /dev/null -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/attendance?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
           echo "HTTP Status: $RESPONSE"
-          if [ "$RESPONSE" = "200" ]; then
+          if [[ "$RESPONSE" =~ ^2[0-9][0-9]$ ]]; then
             echo "status=success" >> $GITHUB_OUTPUT
             echo "Ping completed successfully!"
           else
