@@ -2,7 +2,7 @@
 
 A full-stack athletic attendance management platform built for tracking team practice sessions, squad compliance, and athlete participation statistics.
 
-[Live Demo](https://your-demo-link.vercel.app) · [Report Issue](https://github.com/your-username/ucsd-fencing/issues)
+[Live Demo](https://ucsdfencing.vercel.app/) · [Report Issue](https://github.com/your-username/ucsd-fencing/issues)
 
 ---
 
@@ -10,19 +10,22 @@ A full-stack athletic attendance management platform built for tracking team pra
 
 ### 1. Coach & Admin Dashboard
 > *Team-wide attendance monitoring, roster compliance, and practice session tracking.*
-![Coach Dashboard](./docs/screenshots/coach-dashboard-preview.png)
+<img width="901" height="824" alt="Screenshot 2026-08-31 at 4 28 28 PM" src="https://github.com/user-attachments/assets/80fd7722-a56c-41a4-969f-5bd86237df00" />
+<img width="871" height="596" alt="Screenshot 2026-08-31 at 4 29 22 PM" src="https://github.com/user-attachments/assets/49285b17-ddd5-4d63-bf03-ce3cbd36b6c1" />
 
 ---
 
 ### 2. Captain Practice Check-In
 > *Squad-level attendance logging (Epee, Foil, Sabre) with real-time sync.*
-![Captain Check-In](./docs/screenshots/captain-checkin-preview.png)
+<img width="732" height="623" alt="Screenshot 2026-08-31 at 4 30 50 PM" src="https://github.com/user-attachments/assets/79eec383-be64-412b-a15c-b675e43b1285" />
+
 
 ---
 
 ### 3. Athlete Participation Portal
 > *Individual athlete session history, participation rates, and personal statistics.*
-![Athlete Portal](./docs/screenshots/athlete-portal-preview.png)
+
+<img width="383" height="738" alt="Screenshot 2026-08-31 at 4 30 31 PM" src="https://github.com/user-attachments/assets/587db729-7732-4b1c-ad3e-0fdb09ae5a0f" />
 
 ---
 
