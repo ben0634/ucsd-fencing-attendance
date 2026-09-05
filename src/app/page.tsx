@@ -158,7 +158,7 @@ export default function LoginPage() {
               type="submit"
               className="w-full mt-2 bg-[#182B49] hover:bg-[#1e365d] active:bg-[#132239] text-white font-bold py-2.5 px-4 rounded-lg text-sm tracking-wide transition-colors cursor-pointer"
             >
-              Sign In to Portal
+              Sign In
             </button>
           </form>
         </div>
