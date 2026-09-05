@@ -23,6 +23,7 @@ export default function CoachDashboard() {
   const [customPracticeDays, setCustomPracticeDays] = useState<{[key: string]: string[]}>({});
   const [updatingSchedule, setUpdatingSchedule] = useState<{[key: string]: boolean}>({});
   const [showCustomDaysModal, setShowCustomDaysModal] = useState(false);
+  const [showPastCustomDays, setShowPastCustomDays] = useState(false);
   const [customDayType, setCustomDayType] = useState<'no-practice' | 'practice'>('no-practice');
   const [selectedCustomSquad, setSelectedCustomSquad] = useState<string>('all');
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
@@ -157,6 +158,7 @@ export default function CoachDashboard() {
   const getDefaultPracticeQuarterId = () => {
     const today = new Date();
 
+    // 1. Check if today is currently inside any quarter
     const currentQuarter = quarters.find((q: any) => {
       const start = new Date(q.start_date + 'T00:00:00');
       const end = new Date(q.end_date + 'T23:59:59');
@@ -171,6 +173,18 @@ export default function CoachDashboard() {
       return null;
     }
 
+    // 2. If between quarters, prioritize the next upcoming quarter (e.g. Fall starting soon)
+    const upcomingQuarters = quarters
+      .filter((q: any) => new Date(q.start_date + 'T00:00:00') > today)
+      .sort((a: any, b: any) =>
+        new Date(a.start_date + 'T00:00:00').getTime() - new Date(b.start_date + 'T00:00:00').getTime()
+      );
+
+    if (upcomingQuarters.length > 0) {
+      return upcomingQuarters[0].id;
+    }
+
+    // 3. Otherwise fall back to the most recently completed quarter
     const mostRecentlyStarted = quarters
       .filter((q: any) => new Date(q.start_date + 'T00:00:00') <= today)
       .sort((a: any, b: any) =>
@@ -204,8 +218,11 @@ export default function CoachDashboard() {
   useEffect(() => {
     if (!quarters.length) return;
     const currentQuarterId = getDefaultPracticeQuarterId();
-    if (selectedPracticeQuarterScope === 'global' && currentQuarterId) {
+    if ((selectedPracticeQuarterScope === 'global' || !quarters.some(q => q.id === selectedPracticeQuarterScope)) && currentQuarterId) {
       setSelectedPracticeQuarterScope(currentQuarterId);
+    }
+    if (!selectedAnalyticsQuarter && currentQuarterId) {
+      setSelectedAnalyticsQuarter(currentQuarterId);
     }
   }, [quarters]);
 
@@ -258,6 +275,56 @@ export default function CoachDashboard() {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  };
+
+  // Helper to group consecutive date strings (YYYY-MM-DD) into readable ranges
+  const groupConsecutiveDates = (dateList: string[], todayStr: string) => {
+    if (!dateList || dateList.length === 0) return [];
+    const sorted = Array.from(new Set(dateList)).sort((a, b) => a.localeCompare(b));
+    const groups: { startDate: string; endDate: string; dates: string[]; isRange: boolean; isPast: boolean }[] = [];
+    let currentGroup: string[] = [];
+
+    for (let i = 0; i < sorted.length; i++) {
+      const dStr = sorted[i];
+      if (currentGroup.length === 0) {
+        currentGroup.push(dStr);
+      } else {
+        const prevDStr = currentGroup[currentGroup.length - 1];
+        const prevDate = new Date(prevDStr + 'T00:00:00');
+        const expectedNext = new Date(prevDate);
+        expectedNext.setDate(expectedNext.getDate() + 1);
+        const expectedNextStr = getLocalDateString(expectedNext);
+
+        if (expectedNextStr === dStr) {
+          currentGroup.push(dStr);
+        } else {
+          const start = currentGroup[0];
+          const end = currentGroup[currentGroup.length - 1];
+          groups.push({
+            startDate: start,
+            endDate: end,
+            dates: [...currentGroup],
+            isRange: currentGroup.length > 1,
+            isPast: end < todayStr
+          });
+          currentGroup = [dStr];
+        }
+      }
+    }
+
+    if (currentGroup.length > 0) {
+      const start = currentGroup[0];
+      const end = currentGroup[currentGroup.length - 1];
+      groups.push({
+        startDate: start,
+        endDate: end,
+        dates: [...currentGroup],
+        isRange: currentGroup.length > 1,
+        isPast: end < todayStr
+      });
+    }
+
+    return groups;
   };
 
   const weekDates = getWeekDates();
@@ -1082,38 +1149,44 @@ export default function CoachDashboard() {
     }
   };
 
-  // Remove custom day
-  const removeCustomDay = async (squadId: string, dateToRemove: string, dayType: 'no-practice' | 'practice') => {
+  // Remove one or more custom days (e.g. grouped date range)
+  const removeCustomDays = async (squadId: string, datesToRemove: string[], dayType: 'no-practice' | 'practice') => {
     try {
+      const toRemoveSet = new Set(datesToRemove);
       if (dayType === 'no-practice') {
-        const newDays = (customNoPracticeDays[squadId] || []).filter(date => date !== dateToRemove);
+        const newDays = (customNoPracticeDays[squadId] || []).filter(date => !toRemoveSet.has(date));
         setCustomNoPracticeDays(prev => ({ ...prev, [squadId]: newDays }));
         await updatePracticeScheduleWithCustomDays(
           squadId, 
           practiceSchedules[squadId] || [], 
-          newDays, // Pass the new no-practice days
-          customPracticeDays[squadId] || [], // Keep existing practice days
+          newDays,
+          customPracticeDays[squadId] || [],
           sessionType
         );
       } else {
-        const newDays = (customPracticeDays[squadId] || []).filter(date => date !== dateToRemove);
+        const newDays = (customPracticeDays[squadId] || []).filter(date => !toRemoveSet.has(date));
         setCustomPracticeDays(prev => ({ ...prev, [squadId]: newDays }));
         await updatePracticeScheduleWithCustomDays(
           squadId, 
           practiceSchedules[squadId] || [], 
-          customNoPracticeDays[squadId] || [], // Keep existing no-practice days
-          newDays, // Pass the new practice days
+          customNoPracticeDays[squadId] || [],
+          newDays,
           sessionType
         );
       }
       
-      setMessage(`Custom ${dayType} day removed successfully`);
+      setMessage(`Custom ${dayType} day${datesToRemove.length > 1 ? 's' : ''} removed successfully`);
       setTimeout(() => setMessage(''), 3000);
     } catch (error) {
-      console.error('Error removing custom day:', error);
-      setMessage('Error removing custom day');
+      console.error('Error removing custom days:', error);
+      setMessage('Error removing custom days');
       setTimeout(() => setMessage(''), 3000);
     }
+  };
+
+  // Remove custom day
+  const removeCustomDay = async (squadId: string, dateToRemove: string, dayType: 'no-practice' | 'practice') => {
+    await removeCustomDays(squadId, [dateToRemove], dayType);
   };
 
   // Calculate detailed quarter stats for a specific athlete
@@ -1880,12 +1953,6 @@ export default function CoachDashboard() {
           {/* User Meta & Logout */}
           <div className="flex items-center gap-2 sm:gap-3">
             <button
-              onClick={() => setShowPasswordChange(true)}
-              className="px-3 py-1.5 rounded-lg border border-white/20 text-xs font-semibold text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-            >
-              Password
-            </button>
-            <button
               onClick={handleLogout}
               className="px-3 py-1.5 rounded-lg border border-white/20 text-xs font-semibold text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             >
@@ -2100,253 +2167,265 @@ export default function CoachDashboard() {
           </div>
         ) : viewMode === 'attendance' ? (
           // Attendance Management Mode
-          <div className="bg-white rounded-lg shadow-lg p-3 sm:p-6">
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-6 space-y-5">
             {message && (
-              <div className={`mb-3 sm:mb-4 p-2 sm:p-3 rounded text-xs sm:text-base ${
+              <div className={`p-3 rounded-xl text-xs sm:text-sm font-semibold ${
                 message.startsWith('Error') 
-                  ? 'bg-red-100 text-red-700 border border-red-300' 
-                  : 'bg-green-100 text-green-700 border border-green-300'
+                  ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
               }`}>
                 {message}
               </div>
             )}
 
-            <div className="flex flex-col gap-3 mb-4 sm:mb-6">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                <div className="flex items-center justify-between sm:justify-start gap-2">
-                  <button
-                    onClick={goToPreviousWeek}
-                    className="px-2 sm:px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs sm:text-sm"
-                  >
-                    <span className="hidden sm:inline">← Previous Week</span>
-                    <span className="sm:hidden">← Prev</span>
-                  </button>
-                  
-                  {currentWeekOffset !== 0 && (
-                    <button
-                      onClick={goToCurrentWeek}
-                      className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-xs sm:text-sm"
-                    >
-                      Today
-                    </button>
-                  )}
-                  
-                  <button
-                    onClick={goToNextWeek}
-                    className="px-2 sm:px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs sm:text-sm"
-                  >
-                    <span className="hidden sm:inline">Next Week →</span>
-                    <span className="sm:hidden">Next →</span>
-                  </button>
-                </div>
+            {/* Top Bar: Title & Week Switcher */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-slate-100 gap-4">
+              <div>
+                <h2 className="text-lg sm:text-xl font-extrabold text-[#182B49] tracking-tight">
+                  Mark Attendance
+                </h2>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Record squad check-ins for {sessionType === 'practice' ? 'practice' : 'lift'} sessions
+                </p>
+              </div>
+
+              {/* Week Switcher */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  onClick={goToPreviousWeek}
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                >
+                  <span className="hidden sm:inline">&larr; Previous Week</span>
+                  <span className="sm:hidden">&larr; Prev</span>
+                </button>
                 
-                <h2 className="text-sm sm:text-lg font-semibold text-gray-900">
-                  <span className="hidden sm:inline">Attendance Management - </span>
+                {currentWeekOffset !== 0 && (
+                  <button
+                    onClick={goToCurrentWeek}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Current Week
+                  </button>
+                )}
+                
+                <button
+                  onClick={goToNextWeek}
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                >
+                  <span className="hidden sm:inline">Next Week &rarr;</span>
+                  <span className="sm:hidden">Next &rarr;</span>
+                </button>
+
+                <span className="text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200/80 px-3 py-1.5 rounded-lg ml-1">
                   {currentWeekOffset === 0 ? "This Week" : 
                    currentWeekOffset === -1 ? "Last Week" :
                    currentWeekOffset === 1 ? "Next Week" :
-                   currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
-                   `${currentWeekOffset} Weeks Ahead`} ({formatWeekRange(weekDates)})
-                </h2>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={goToPreviousAttendanceDay}
-                    className="px-2 sm:px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-xs sm:text-sm"
-                  >
-                    <span className="hidden sm:inline">← Previous Day</span>
-                    <span className="sm:hidden">← Day</span>
-                  </button>
-                  <button
-                    onClick={goToNextAttendanceDay}
-                    className="px-2 sm:px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-xs sm:text-sm"
-                  >
-                    <span className="hidden sm:inline">Next Day →</span>
-                    <span className="sm:hidden">Day →</span>
-                  </button>
-                </div>
-
-                <button
-                  onClick={goToTodayAttendanceDay}
-                  className="px-2 sm:px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-xs sm:text-sm w-fit"
-                >
-                  Go to Today
-                </button>
-
-                <div className="text-sm sm:text-base font-semibold text-gray-900 bg-indigo-50 border border-indigo-200 rounded px-3 py-1.5 w-fit">
-                  {activeAttendanceDayName} ({formatDate(activeAttendanceDate)})
-                </div>
-
-                <div className="flex items-center gap-2 ml-0 sm:ml-auto">
-                  <button
-                    onClick={() =>
-                      setExpandedAttendanceSquads(
-                        squads.reduce((acc: {[key: string]: boolean}, squad) => {
-                          acc[squad.id] = true;
-                          return acc;
-                        }, {})
-                      )
-                    }
-                    className="px-2 sm:px-3 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-xs sm:text-sm"
-                  >
-                    Expand All
-                  </button>
-                  <button
-                    onClick={() =>
-                      setExpandedAttendanceSquads(
-                        squads.reduce((acc: {[key: string]: boolean}, squad) => {
-                          acc[squad.id] = false;
-                          return acc;
-                        }, {})
-                      )
-                    }
-                    className="px-2 sm:px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-xs sm:text-sm"
-                  >
-                    Collapse All
-                  </button>
-                </div>
+                   currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)}w ago` :
+                   `${currentWeekOffset}w ahead`} ({formatWeekRange(weekDates)})
+                </span>
               </div>
             </div>
 
-            <div className="space-y-2 sm:space-y-3">
+            {/* Day Switcher & Expand/Collapse Row */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50/80 border border-slate-200/80 rounded-xl p-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={goToPreviousAttendanceDay}
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                >
+                  &larr; Prev Day
+                </button>
+
+                <div className="text-xs sm:text-sm font-extrabold text-[#182B49] bg-white border border-slate-200/90 rounded-lg px-3 py-1.5 shadow-2xs flex items-center gap-1.5">
+                  <span>{activeAttendanceDayName}</span>
+                  <span className="text-slate-400 font-medium">({formatDate(activeAttendanceDate)})</span>
+                </div>
+
+                <button
+                  onClick={goToNextAttendanceDay}
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                >
+                  Next Day &rarr;
+                </button>
+
+                <button
+                  onClick={goToTodayAttendanceDay}
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-600 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Today
+                </button>
+              </div>
+
+              {/* Expand / Collapse Controls */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() =>
+                    setExpandedAttendanceSquads(
+                      squads.reduce((acc: {[key: string]: boolean}, squad) => {
+                        acc[squad.id] = true;
+                        return acc;
+                      }, {})
+                    )
+                  }
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                >
+                  Expand All
+                </button>
+                <button
+                  onClick={() =>
+                    setExpandedAttendanceSquads(
+                      squads.reduce((acc: {[key: string]: boolean}, squad) => {
+                        acc[squad.id] = false;
+                        return acc;
+                      }, {})
+                    )
+                  }
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                >
+                  Collapse All
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
               {squads.map(squad => {
                 const hasSquadPractice = hasPractice(squad.id, activeAttendanceDate);
                 const isExpanded = expandedAttendanceSquads[squad.id] ?? false;
 
                 return (
-                  <div key={squad.id} className="border rounded-lg overflow-hidden">
+                  <div key={squad.id} className="border border-slate-200/90 rounded-xl overflow-hidden bg-white shadow-2xs transition-all">
                     <button
                       onClick={() => toggleAttendanceSquadExpanded(squad.id)}
-                      className="w-full flex items-center justify-between px-3 sm:px-4 py-3 bg-gray-50 hover:bg-gray-100 transition"
+                      className="w-full flex items-center justify-between px-4 py-3.5 bg-slate-50/70 hover:bg-slate-100/80 transition-colors cursor-pointer"
                     >
-                      <div className="flex items-center gap-2 sm:gap-3 text-left">
-                        <span className="text-sm sm:text-base font-bold text-gray-900">{squad.displayName}</span>
-                        <span className={`text-[11px] sm:text-xs px-2 py-1 rounded-full font-semibold ${
+                      <div className="flex items-center gap-2.5 text-left">
+                        <span className="text-sm sm:text-base font-extrabold text-[#182B49]">{squad.displayName}</span>
+                        <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
                           hasSquadPractice
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-gray-200 text-gray-600'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-slate-100 text-slate-500 border border-slate-200'
                         }`}>
                           {hasSquadPractice ? `${sessionType === 'practice' ? 'Practice' : 'Lift'} Scheduled` : `No ${sessionType === 'practice' ? 'Practice' : 'Lift'}`}
                         </span>
                       </div>
-                      <span className="text-gray-600 text-lg">{isExpanded ? '−' : '+'}</span>
+                      <span className="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-2 py-1 rounded-md">
+                        {isExpanded ? 'Collapse' : 'Expand'}
+                      </span>
                     </button>
 
                     {isExpanded && (
-                      <div className="p-2 sm:p-3 bg-white">
+                      <div className="p-3 sm:p-4 bg-white border-t border-slate-100">
                         {!hasSquadPractice ? (
-                          <div className="border rounded p-3 bg-gray-50 text-sm text-gray-600">
-                            No {sessionType === 'practice' ? 'practice' : 'lift'} scheduled for this squad on {activeAttendanceDayName} ({formatDate(activeAttendanceDate)}).
+                          <div className="rounded-xl p-4 bg-slate-50 text-xs sm:text-sm text-slate-500 font-medium text-center border border-slate-200/60">
+                            No {sessionType === 'practice' ? 'practice' : 'lift'} scheduled for {squad.displayName} on {activeAttendanceDayName} ({formatDate(activeAttendanceDate)}).
                           </div>
                         ) : (
-                          <div className="grid gap-1.5 sm:gap-2">
+                          <div className="space-y-2">
                             {squad.members.map((member: any) => {
                               const currentStatus = getAttendanceStatus(member.id, activeAttendanceDate);
                               const markingKey = `${member.id}-${getLocalDateString(activeAttendanceDate)}`;
                               const isMarking = markingAttendance[markingKey];
+                              const notes = getAttendanceNotes(member.id, activeAttendanceDate);
 
                               return (
-                                <div key={member.id} className="flex flex-col lg:flex-row lg:items-center lg:justify-between p-2 bg-gray-50 rounded gap-1.5 sm:gap-2">
+                                <div key={member.id} className="flex flex-col xl:flex-row xl:items-center xl:justify-between p-3 bg-slate-50/70 hover:bg-slate-50 rounded-xl gap-2.5 border border-slate-200/80 transition-colors">
                                   <div className="flex-1 min-w-0">
-                                    <div className="font-semibold text-gray-900 text-sm sm:text-base truncate">
-                                      {member.full_name}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-bold text-slate-900 text-sm">
+                                        {member.full_name}
+                                      </span>
                                       {member.role === 'captain' && (
-                                        <span className="ml-2 text-[10px] sm:text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-                                          Captain 🔱
+                                        <span className="text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-[#00629B] border border-blue-200/60 px-1.5 py-0.5 rounded">
+                                          Captain
                                         </span>
                                       )}
                                     </div>
 
-                                    {(() => {
-                                      const notes = getAttendanceNotes(member.id, activeAttendanceDate);
-                                      return (
-                                        <div className="text-xs sm:text-sm text-gray-600 mt-1 flex items-center gap-2">
-                                          <span>
-                                            Current: <span className={`font-semibold ${
-                                              !currentStatus ? 'text-gray-500' :
-                                              currentStatus === 'on-time' ? 'text-green-600' :
-                                              currentStatus === 'late' ? 'text-yellow-600' :
-                                              currentStatus === 'late-justified' ? 'text-green-600' :
-                                              currentStatus === 'excused' ? 'text-blue-600' :
-                                              'text-red-600'
-                                            }`}>
-                                              {!currentStatus ? 'Not Marked' :
-                                               currentStatus === 'on-time' ? 'On Time' :
-                                               currentStatus === 'late' ? 'Late' :
-                                               currentStatus === 'late-justified' ? 'Late (Justified)' :
-                                               currentStatus === 'excused' ? 'Excused' :
-                                               'Missing'}
-                                            </span>
-                                          </span>
-                                          {notes && (
-                                            <div className="relative group">
-                                              <span className="inline-flex items-center text-blue-600">📝</span>
-                                              <div className="hidden group-hover:block absolute z-50 bg-gray-900 text-white text-xs rounded px-2 py-1 -translate-y-full -mt-1 left-0 whitespace-normal max-w-xs shadow-lg">
-                                                {notes}
-                                                <div className="absolute top-full left-2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
-                                              </div>
-                                            </div>
-                                          )}
-                                        </div>
-                                      );
-                                    })()}
+                                    <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                                      <span>
+                                        Status: <span className={`font-semibold ${
+                                          currentStatus === 'on-time' || currentStatus === 'late-justified' ? 'text-emerald-700' :
+                                          currentStatus === 'late' ? 'text-amber-700' :
+                                          currentStatus === 'excused' ? 'text-blue-700' :
+                                          currentStatus === 'missing' ? 'text-rose-700' :
+                                          'text-slate-400'
+                                        }`}>
+                                          {!currentStatus ? 'Not Marked' :
+                                           currentStatus === 'on-time' ? 'On Time' :
+                                           currentStatus === 'late' ? 'Late' :
+                                           currentStatus === 'late-justified' ? 'Late (Justified)' :
+                                           currentStatus === 'excused' ? 'Excused' :
+                                           'Missing'}
+                                        </span>
+                                      </span>
+                                      {notes && (
+                                        <span className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded" title={notes}>
+                                          Note: {notes}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
 
-                                    <div className="w-full lg:w-auto lg:min-w-[640px]">
+                                  {/* Clean Action Buttons */}
+                                  <div className="flex flex-wrap gap-1.5 items-center">
                                     {isMarking && (
-                                      <div className="text-xs sm:text-sm text-gray-500 mb-2">Updating...</div>
+                                      <span className="text-xs text-slate-400 font-medium mr-1">Saving...</span>
                                     )}
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <div className="flex flex-wrap gap-1.5 rounded-xl border border-gray-200 bg-white p-1">
-                                        {['on-time', 'late-justified', 'late'].map((status) => (
-                                          <button
-                                            key={status}
-                                            onClick={() => markAttendance(member.id, activeAttendanceDate, status)}
-                                            disabled={isMarking}
-                                            className={`h-9 sm:h-10 min-w-[100px] px-3 rounded-lg border border-transparent text-xs sm:text-sm font-semibold text-white transition-all shadow-sm ${
-                                              status === 'on-time'
-                                                ? 'bg-green-500 hover:bg-green-600'
-                                                : status === 'late-justified'
-                                                ? 'bg-green-600 hover:bg-green-700'
-                                                : 'bg-yellow-500 hover:bg-yellow-600'
-                                            } ${
-                                              currentStatus === status
-                                                ? 'ring-2 ring-white/90 ring-offset-2 ring-offset-gray-200 shadow-md scale-[1.01]'
-                                                : 'opacity-95 hover:opacity-100'
-                                            }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
-                                          >
-                                            {status === 'on-time' ? 'On Time' :
-                                             status === 'late-justified' ? 'Late (J)' :
-                                             'Late'}
-                                          </button>
-                                        ))}
-                                      </div>
-
-                                      <div className="hidden lg:block h-7 w-px bg-gray-300" />
-
-                                      <div className="flex flex-wrap gap-1.5 rounded-xl border border-gray-200 bg-white p-1">
-                                        {['excused', 'missing'].map((status) => (
-                                          <button
-                                            key={status}
-                                            onClick={() => markAttendance(member.id, activeAttendanceDate, status)}
-                                            disabled={isMarking}
-                                            className={`h-9 sm:h-10 min-w-[100px] px-3 rounded-lg border border-transparent text-xs sm:text-sm font-semibold text-white transition-all shadow-sm ${
-                                              status === 'excused'
-                                                ? 'bg-blue-500 hover:bg-blue-600'
-                                                : 'bg-red-500 hover:bg-red-600'
-                                            } ${
-                                              currentStatus === status
-                                                ? 'ring-2 ring-white/90 ring-offset-2 ring-offset-gray-200 shadow-md scale-[1.01]'
-                                                : 'opacity-95 hover:opacity-100'
-                                            }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
-                                          >
-                                            {status === 'excused' ? 'Excused' : 'Missing'}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
+                                    <button
+                                      onClick={() => markAttendance(member.id, activeAttendanceDate, 'on-time')}
+                                      disabled={isMarking}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                        currentStatus === 'on-time'
+                                          ? 'bg-emerald-600 text-white shadow-xs'
+                                          : 'bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                      On Time
+                                    </button>
+                                    <button
+                                      onClick={() => markAttendance(member.id, activeAttendanceDate, 'late-justified')}
+                                      disabled={isMarking}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                        currentStatus === 'late-justified'
+                                          ? 'bg-teal-600 text-white shadow-xs'
+                                          : 'bg-white hover:bg-teal-50 text-teal-700 border border-teal-200'
+                                      }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                      Late (J)
+                                    </button>
+                                    <button
+                                      onClick={() => markAttendance(member.id, activeAttendanceDate, 'late')}
+                                      disabled={isMarking}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                        currentStatus === 'late'
+                                          ? 'bg-amber-500 text-white shadow-xs'
+                                          : 'bg-white hover:bg-amber-50 text-amber-700 border border-amber-200'
+                                      }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                      Late
+                                    </button>
+                                    <button
+                                      onClick={() => markAttendance(member.id, activeAttendanceDate, 'excused')}
+                                      disabled={isMarking}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                        currentStatus === 'excused'
+                                          ? 'bg-blue-600 text-white shadow-xs'
+                                          : 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-200'
+                                      }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                      Excused
+                                    </button>
+                                    <button
+                                      onClick={() => markAttendance(member.id, activeAttendanceDate, 'missing')}
+                                      disabled={isMarking}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                        currentStatus === 'missing'
+                                          ? 'bg-rose-600 text-white shadow-xs'
+                                          : 'bg-white hover:bg-rose-50 text-rose-700 border border-rose-200'
+                                      }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                      Missing
+                                    </button>
                                   </div>
                                 </div>
                               );
@@ -2362,42 +2441,54 @@ export default function CoachDashboard() {
           </div>
         ) : viewMode === 'captains' ? (
           // Captain Management Mode
-          <div className="bg-white rounded-lg shadow-lg p-3 sm:p-6">
+          <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-4 sm:p-6">
             {message && (
-              <div className={`mb-3 sm:mb-4 p-2 sm:p-3 rounded text-xs sm:text-base ${
+              <div className={`mb-4 p-3 rounded-lg text-xs sm:text-sm font-medium border ${
                 message.startsWith('Error') 
-                  ? 'bg-red-100 text-red-700 border border-red-300' 
-                  : 'bg-green-100 text-green-700 border border-green-300'
+                  ? 'bg-rose-50 text-rose-800 border-rose-200' 
+                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
               }`}>
                 {message}
               </div>
             )}
 
-            <div className="mb-4 sm:mb-6">
-              <h2 className="text-lg sm:text-xl font-bold text-gray-900 mb-2 sm:mb-4">Manage Squad Captains</h2>
-              <p className="text-gray-600 text-xs sm:text-sm mb-3 sm:mb-4">
-                Select who should be the captain for each squad. Only one captain per squad is allowed.
+            <div className="mb-5 sm:mb-6">
+              <h2 className="text-lg sm:text-xl font-bold text-[#182B49] tracking-tight mb-1">Manage Squad Captains</h2>
+              <p className="text-slate-500 text-xs sm:text-sm">
+                Designate the squad captain for each weapon group. Only one captain per squad is allowed.
               </p>
             </div>
 
-            <div className="space-y-3 sm:space-y-6">
+            <div className="space-y-4 sm:space-y-5">
               {squads.map(squad => {
                 const currentCaptain = squad.members.find((m: any) => m.role === 'captain');
                 const isUpdating = updatingCaptain[squad.id];
                 
                 return (
-                  <div key={squad.id} className="border rounded-lg p-3 sm:p-4 bg-gray-50">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div key={squad.id} className="border border-slate-200/90 rounded-xl p-4 sm:p-5 bg-white shadow-2xs hover:border-slate-300 transition">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3.5 border-b border-slate-100">
                       <div>
-                        <h3 className="font-bold text-base sm:text-lg text-gray-900 mb-1">{ squad.displayName}</h3>
-                        <p className="text-xs sm:text-sm text-gray-600">
-                          Current Captain: {currentCaptain ? currentCaptain.full_name : 'None'}
-                        </p>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="font-bold text-base sm:text-lg text-[#182B49]">{squad.displayName}</h3>
+                          <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                            {squad.members.length} {squad.members.length === 1 ? 'member' : 'members'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                          <span className="text-slate-400 font-medium">Current Captain:</span>
+                          {currentCaptain ? (
+                            <span className="font-bold text-[#182B49] bg-[#182B49]/5 px-2 py-0.5 rounded text-xs border border-[#182B49]/10">
+                              {currentCaptain.full_name}
+                            </span>
+                          ) : (
+                            <span className="italic text-slate-400">None assigned</span>
+                          )}
+                        </div>
                       </div>
                       
                       <div className="flex items-center gap-2 sm:gap-3">
                         {isUpdating && (
-                          <span className="text-xs sm:text-sm text-gray-500">Updating...</span>
+                          <span className="text-xs text-slate-400 font-medium animate-pulse">Updating...</span>
                         )}
                         <select
                           value={currentCaptain?.id || ''}
@@ -2407,7 +2498,7 @@ export default function CoachDashboard() {
                             }
                           }}
                           disabled={isUpdating}
-                          className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base w-full sm:min-w-[200px]"
+                          className="px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm text-slate-800 bg-white font-medium shadow-2xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#182B49] w-full sm:min-w-[220px]"
                         >
                           <option value="">Select Captain...</option>
                           {squad.members.map((member: any) => (
@@ -2420,20 +2511,24 @@ export default function CoachDashboard() {
                       </div>
                     </div>
                     
-                    <div className="mt-2 sm:mt-3 text-xs sm:text-sm text-gray-600">
-                      <p><strong>Squad Members:</strong></p>
-                      <div className="flex flex-wrap gap-1.5 sm:gap-2 mt-1">
+                    <div className="mt-3.5">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Squad Roster</p>
+                      <div className="flex flex-wrap gap-1.5 sm:gap-2">
                         {squad.members.map((member: any) => (
                           <span 
                             key={member.id}
-                            className={`px-2 py-1 rounded text-xs ${
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs transition ${
                               member.role === 'captain' 
-                                ? 'bg-blue-100 text-blue-800 font-medium' 
-                                : 'bg-gray-100 text-gray-700'
+                                ? 'bg-[#182B49] text-white font-semibold shadow-2xs' 
+                                : 'bg-slate-100 text-slate-700 font-medium border border-slate-200/60'
                             }`}
                           >
-                            {member.full_name}
-                            {member.role === 'captain' && ' 🔱'}
+                            <span>{member.full_name}</span>
+                            {member.role === 'captain' && (
+                              <span className="text-[9px] uppercase tracking-wider font-bold text-[#FFCD00] bg-white/10 px-1 py-0.5 rounded">
+                                Captain
+                              </span>
+                            )}
                           </span>
                         ))}
                       </div>
@@ -2452,21 +2547,24 @@ export default function CoachDashboard() {
                 <p className="text-gray-600 text-xs sm:text-sm max-w-xl">Configure recurring {sessionType === 'practice' ? 'practice' : 'lift'} days and override with custom cancellations or extra sessions.</p>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-                <div className="flex bg-gray-100 rounded-md overflow-hidden border border-gray-300 w-full sm:w-auto">
-                  <button onClick={() => setSessionType('practice')} className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${sessionType === 'practice' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Practice</button>
-                  <button onClick={() => setSessionType('lift')} className={`flex-1 sm:flex-none px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${sessionType === 'lift' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'}`}>Lift</button>
+                <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200 w-full sm:w-auto">
+                  <button onClick={() => setSessionType('practice')} className={`flex-1 sm:flex-none px-3.5 py-1.5 text-xs font-bold rounded-md transition cursor-pointer ${sessionType === 'practice' ? 'bg-[#182B49] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'}`}>Practice</button>
+                  <button onClick={() => setSessionType('lift')} className={`flex-1 sm:flex-none px-3.5 py-1.5 text-xs font-bold rounded-md transition cursor-pointer ${sessionType === 'lift' ? 'bg-[#182B49] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'}`}>Lift</button>
                 </div>
                 <select
                   value={selectedPracticeQuarterScope}
                   onChange={(e) => setSelectedPracticeQuarterScope(e.target.value)}
-                  className="px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md text-xs sm:text-sm text-gray-900 bg-white"
+                  className="px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm text-slate-800 bg-white font-semibold shadow-2xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#182B49]"
                 >
-                  <option value="global">Global (all dates)</option>
-                  {quarters.map((quarter) => (
-                    <option key={quarter.id} value={quarter.id}>
-                      {quarter.name} ({new Date(quarter.start_date + 'T00:00:00').toLocaleDateString()} - {new Date(quarter.end_date + 'T00:00:00').toLocaleDateString()})
-                    </option>
-                  ))}
+                  {quarters.length === 0 ? (
+                    <option value="global">No quarters defined</option>
+                  ) : (
+                    quarters.map((quarter) => (
+                      <option key={quarter.id} value={quarter.id}>
+                        {quarter.name} ({new Date(quarter.start_date + 'T00:00:00').toLocaleDateString()} - {new Date(quarter.end_date + 'T00:00:00').toLocaleDateString()})
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
             </div>
@@ -2515,7 +2613,7 @@ export default function CoachDashboard() {
                           >
                             {isUpdating ? (
                               <span className="flex items-center gap-1">
-                                <span className="animate-spin">⚪</span>
+                                <svg className="animate-spin h-3 w-3 inline" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
                                 <span className="hidden sm:inline">{day}</span>
                                 <span className="sm:hidden">{day.substring(0, 3)}</span>
                               </span>
@@ -2538,82 +2636,173 @@ export default function CoachDashboard() {
               })}
               
               {/* Custom Days Management */}
-              <div className="border-t pt-4 sm:pt-6">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
-                  <h3 className="text-base sm:text-lg font-semibold text-gray-800">Custom {sessionType === 'practice' ? 'Practice' : 'Lift'} Days</h3>
-                  <button
-                    onClick={() => setShowCustomDaysModal(true)}
-                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-xs sm:text-sm"
-                  >
-                    Add Custom Days
-                  </button>
-                </div>
-                
-                <p className="text-gray-600 mb-3 sm:mb-4 text-xs sm:text-sm">Override regular {sessionType === 'practice' ? 'practice' : 'lift'} schedule for specific dates or date ranges. Scope: <span className="font-semibold">{selectedPracticeQuarterScope === 'global' ? 'Global (all dates)' : (quarters.find(q => q.id === selectedPracticeQuarterScope)?.name || 'Selected quarter')}</span>.</p>
+              <div className="border-t border-slate-200 pt-6">
+                {(() => {
+                  const todayStr = getLocalDateString(new Date());
+                  const totalPastCustomDays = [...squads, { id: 'all' }].reduce((acc, squad) => {
+                    const noPrac = (customNoPracticeDays[squad.id] || []).filter(d => d < todayStr).length;
+                    const prac = (customPracticeDays[squad.id] || []).filter(d => d < todayStr).length;
+                    return acc + noPrac + prac;
+                  }, 0);
 
-                {/* Display existing custom days */}
-                <div className="space-y-3 sm:space-y-4">
-                  {[...squads, { id: 'all', displayName: 'Whole Team' }].map((squad) => {
-                    const noPracticeDays = customNoPracticeDays[squad.id] || [];
-                    const practiceDays = customPracticeDays[squad.id] || [];
-                    
-                    if (noPracticeDays.length === 0 && practiceDays.length === 0) return null;
-                    
-                    return (
-                      <div key={`custom-${squad.id}`} className="border border-gray-200 rounded-lg p-2 sm:p-4 bg-gray-50">
-                        <h4 className="font-medium text-gray-900 mb-2 text-sm sm:text-base">{squad.displayName}</h4>
-                        
-                        {noPracticeDays.length > 0 && (
-                          <div className="mb-3">
-                            <h5 className="text-xs sm:text-sm font-medium text-red-700 mb-2">No Practice Days:</h5>
-                            <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                              {noPracticeDays.map((date) => (
-                                <span
-                                  key={date}
-                                  className="inline-flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1 bg-red-100 text-red-700 rounded-lg text-[10px] sm:text-sm"
-                                >
-                                  {new Date(date + 'T00:00:00').toLocaleDateString()}
-                                  <button
-                                    onClick={() => removeCustomDay(squad.id, date, 'no-practice')}
-                                    className="text-red-500 hover:text-red-700 text-sm sm:text-base"
-                                  >
-                                    ×
-                                  </button>
-                                </span>
-                              ))}
+                  return (
+                    <>
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                        <div>
+                          <h3 className="text-base sm:text-lg font-bold text-[#182B49]">
+                            Custom {sessionType === 'practice' ? 'Practice' : 'Lift'} Days
+                          </h3>
+                          <p className="text-slate-500 text-xs mt-0.5">
+                            Override regular {sessionType === 'practice' ? 'practice' : 'lift'} schedule for specific dates or date ranges. Scope: <span className="font-semibold text-slate-700">{selectedPracticeQuarterScope === 'global' ? 'Global (all dates)' : (quarters.find(q => q.id === selectedPracticeQuarterScope)?.name || 'Selected quarter')}</span>.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {totalPastCustomDays > 0 && (
+                            <button
+                              onClick={() => setShowPastCustomDays(prev => !prev)}
+                              className="px-3 py-1.5 bg-white border border-slate-300 hover:border-slate-400 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                            >
+                              {showPastCustomDays ? 'Hide Past Dates' : `Show Past Dates (${totalPastCustomDays})`}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setShowCustomDaysModal(true)}
+                            className="px-3 sm:px-4 py-1.5 bg-[#182B49] hover:bg-[#1e365d] text-white rounded-lg text-xs sm:text-sm font-semibold shadow-xs transition-colors cursor-pointer"
+                          >
+                            Add Custom Days
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Display existing custom days */}
+                      <div className="space-y-3 sm:space-y-4">
+                        {[...squads, { id: 'all', displayName: 'Whole Team' }].map((squad) => {
+                          const rawNoPracticeDays = customNoPracticeDays[squad.id] || [];
+                          const rawPracticeDays = customPracticeDays[squad.id] || [];
+                          
+                          if (rawNoPracticeDays.length === 0 && rawPracticeDays.length === 0) return null;
+
+                          const noPracticeGroups = groupConsecutiveDates(rawNoPracticeDays, todayStr);
+                          const practiceGroups = groupConsecutiveDates(rawPracticeDays, todayStr);
+
+                          const upcomingNoPracticeGroups = noPracticeGroups.filter(g => !g.isPast);
+                          const upcomingPracticeGroups = practiceGroups.filter(g => !g.isPast);
+
+                          const displayNoPracticeGroups = showPastCustomDays ? noPracticeGroups : upcomingNoPracticeGroups;
+                          const displayPracticeGroups = showPastCustomDays ? practiceGroups : upcomingPracticeGroups;
+
+                          const totalHiddenPast = noPracticeGroups.filter(g => g.isPast).length + practiceGroups.filter(g => g.isPast).length;
+
+                          if (!showPastCustomDays && displayNoPracticeGroups.length === 0 && displayPracticeGroups.length === 0) {
+                            return (
+                              <div key={`custom-${squad.id}`} className="border border-slate-200/80 rounded-xl p-3 sm:p-4 bg-slate-50/50">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="font-extrabold text-slate-800 text-sm">{squad.displayName}</h4>
+                                  <span className="text-[11px] text-slate-400 font-medium italic">
+                                    No upcoming overrides ({totalHiddenPast} past override{totalHiddenPast !== 1 ? 's' : ''} hidden)
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          }
+                          
+                          return (
+                            <div key={`custom-${squad.id}`} className="border border-slate-200/90 rounded-xl p-3.5 sm:p-4 bg-white shadow-2xs space-y-3">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-extrabold text-base text-[#182B49]">{squad.displayName}</h4>
+                                {!showPastCustomDays && totalHiddenPast > 0 && (
+                                  <span className="text-[11px] text-slate-400 font-medium">
+                                    {totalHiddenPast} past override{totalHiddenPast !== 1 ? 's' : ''} hidden
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {displayNoPracticeGroups.length > 0 && (
+                                <div>
+                                  <h5 className="text-xs font-bold uppercase tracking-wider text-rose-700 mb-2">No Practice Days</h5>
+                                  <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                                    {displayNoPracticeGroups.map((group) => {
+                                      const label = group.isRange
+                                        ? `${new Date(group.startDate + 'T00:00:00').toLocaleDateString()} – ${new Date(group.endDate + 'T00:00:00').toLocaleDateString()} (${group.dates.length} days)`
+                                        : new Date(group.startDate + 'T00:00:00').toLocaleDateString();
+
+                                      return (
+                                        <span
+                                          key={`${group.startDate}-${group.endDate}`}
+                                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${
+                                            group.isPast
+                                              ? 'bg-slate-100 text-slate-500 border border-slate-200 opacity-85'
+                                              : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                          }`}
+                                        >
+                                          <span>{label}</span>
+                                          {group.isPast && (
+                                            <span className="text-[9px] uppercase tracking-wider bg-slate-200 text-slate-600 px-1 py-0.2 rounded font-bold">
+                                              Past
+                                            </span>
+                                          )}
+                                          <button
+                                            onClick={() => removeCustomDays(squad.id, group.dates, 'no-practice')}
+                                            className="text-rose-500 hover:text-rose-700 font-bold ml-0.5 cursor-pointer leading-none"
+                                            title={group.isRange ? `Remove ${group.dates.length} days` : "Remove date"}
+                                          >
+                                            &times;
+                                          </button>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {displayPracticeGroups.length > 0 && (
+                                <div>
+                                  <h5 className="text-xs font-bold uppercase tracking-wider text-emerald-700 mb-2">Extra Practice Days</h5>
+                                  <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                                    {displayPracticeGroups.map((group) => {
+                                      const label = group.isRange
+                                        ? `${new Date(group.startDate + 'T00:00:00').toLocaleDateString()} – ${new Date(group.endDate + 'T00:00:00').toLocaleDateString()} (${group.dates.length} days)`
+                                        : new Date(group.startDate + 'T00:00:00').toLocaleDateString();
+
+                                      return (
+                                        <span
+                                          key={`${group.startDate}-${group.endDate}`}
+                                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${
+                                            group.isPast
+                                              ? 'bg-slate-100 text-slate-500 border border-slate-200 opacity-85'
+                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                          }`}
+                                        >
+                                          <span>{label}</span>
+                                          {group.isPast && (
+                                            <span className="text-[9px] uppercase tracking-wider bg-slate-200 text-slate-600 px-1 py-0.2 rounded font-bold">
+                                              Past
+                                            </span>
+                                          )}
+                                          <button
+                                            onClick={() => removeCustomDays(squad.id, group.dates, 'practice')}
+                                            className="text-emerald-500 hover:text-emerald-700 font-bold ml-0.5 cursor-pointer leading-none"
+                                            title={group.isRange ? `Remove ${group.dates.length} days` : "Remove date"}
+                                          >
+                                            &times;
+                                          </button>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        )}
+                          );
+                        })}
                         
-                        {practiceDays.length > 0 && (
-                          <div>
-                            <h5 className="text-xs sm:text-sm font-medium text-green-700 mb-2">Extra Practice Days:</h5>
-                            <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                              {practiceDays.map((date) => (
-                                <span
-                                  key={date}
-                                  className="inline-flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1 bg-green-100 text-green-700 rounded-lg text-[10px] sm:text-sm"
-                                >
-                                  {new Date(date + 'T00:00:00').toLocaleDateString()}
-                                  <button
-                                    onClick={() => removeCustomDay(squad.id, date, 'practice')}
-                                    className="text-green-500 hover:text-green-700"
-                                  >
-                                    ×
-                                  </button>
-                                </span>
-                              ))}
-                            </div>
-                          </div>
+                        {[...squads, { id: 'all' }].every(squad => (customNoPracticeDays[squad.id] || []).length === 0 && (customPracticeDays[squad.id] || []).length === 0) && (
+                          <p className="text-gray-500 italic text-sm">No custom days set for {sessionType === 'practice' ? 'practice' : 'lift'}. Click &quot;Add Custom Days&quot; to get started.</p>
                         )}
                       </div>
-                    );
-                  })}
-                  
-                  {[...squads, { id: 'all' }].every(squad => (customNoPracticeDays[squad.id] || []).length === 0 && (customPracticeDays[squad.id] || []).length === 0) && (
-                    <p className="text-gray-500 italic">No custom days set for {sessionType === 'practice' ? 'practice' : 'lift'}. Click "Add Custom Days" to get started.</p>
-                  )}
-                </div>
+                    </>
+                  );
+                })()}
               </div>
               
               {/* Quarter Management Section */}
@@ -2735,29 +2924,29 @@ export default function CoachDashboard() {
           </div>
         ) : (
           // Analytics Mode
-          <div className="analytics-print-area bg-white rounded-lg shadow-lg p-3 sm:p-6">
+          <div className="analytics-print-area bg-white rounded-xl shadow-xs border border-slate-200 p-4 sm:p-6">
             <div className="mb-4 sm:mb-6">
               <div className="flex flex-col gap-3 mb-3 sm:mb-4">
-                <h2 className="text-base sm:text-xl font-bold text-gray-900">
+                <h2 className="text-base sm:text-xl font-bold text-[#182B49] tracking-tight">
                   UCSD Fencing Team - {sessionType === 'practice' ? 'Practice' : 'Lift'} Attendance Report
                 </h2>
                 
                 {/* View Mode Toggle */}
-                <div className="print-controls flex flex-wrap items-center gap-2">
-                  <span className="text-xs sm:text-sm text-gray-700 font-medium">View by:</span>
-                  <div className="flex bg-gray-100 rounded-md overflow-hidden border border-gray-300">
+                <div className="print-controls flex flex-wrap items-center gap-2.5">
+                  <span className="text-xs sm:text-sm text-slate-500 font-semibold">View by:</span>
+                  <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200">
                     <button
                       onClick={() => setAnalyticsViewMode('month')}
-                      className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${
-                        analyticsViewMode === 'month' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'
+                      className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition cursor-pointer ${
+                        analyticsViewMode === 'month' ? 'bg-[#182B49] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       Month
                     </button>
                     <button
                       onClick={() => setAnalyticsViewMode('quarter')}
-                      className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${
-                        analyticsViewMode === 'quarter' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-white'
+                      className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition cursor-pointer ${
+                        analyticsViewMode === 'quarter' ? 'bg-[#182B49] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
                       Quarter
@@ -2765,13 +2954,13 @@ export default function CoachDashboard() {
                   </div>
                 </div>
                 
-                <div className="print-controls flex flex-wrap items-center gap-2 sm:gap-4">
+                <div className="print-controls flex flex-wrap items-center gap-2 sm:gap-3">
                   {analyticsViewMode === 'month' ? (
                     <>
                       <select
                         value={selectedMonth}
                         onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-                        className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base flex-1 sm:flex-none"
+                        className="px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm text-slate-800 bg-white font-medium shadow-2xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#182B49] flex-1 sm:flex-none"
                       >
                         {Array.from({ length: 12 }, (_, i) => (
                           <option key={i} value={i}>
@@ -2783,7 +2972,7 @@ export default function CoachDashboard() {
                       <select
                         value={selectedYear}
                         onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                        className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base flex-1 sm:flex-none"
+                        className="px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm text-slate-800 bg-white font-medium shadow-2xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#182B49] flex-1 sm:flex-none"
                       >
                         <option value={2024}>2024</option>
                         <option value={2025}>2025</option>
@@ -2794,7 +2983,7 @@ export default function CoachDashboard() {
                     <select
                       value={selectedAnalyticsQuarter || ''}
                       onChange={(e) => setSelectedAnalyticsQuarter(e.target.value)}
-                      className="px-2 sm:px-3 py-1.5 sm:py-2 border rounded text-gray-900 text-xs sm:text-base flex-1"
+                      className="px-3 py-1.5 sm:py-2 border border-slate-300 rounded-lg text-xs sm:text-sm text-slate-800 bg-white font-medium shadow-2xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#182B49] flex-1"
                     >
                       <option value="">Select a quarter</option>
                       {quarters.map((quarter) => (
@@ -2807,21 +2996,25 @@ export default function CoachDashboard() {
 
                   <button
                     onClick={handlePrint}
-                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-green-600 hover:bg-green-700 text-white rounded transition-colors flex items-center gap-1 sm:gap-2 text-xs sm:text-base w-full sm:w-auto justify-center"
+                    className="px-3.5 sm:px-4 py-1.5 sm:py-2 bg-[#182B49] hover:bg-[#182B49]/90 text-white rounded-lg transition-colors flex items-center gap-1.5 text-xs sm:text-sm font-semibold shadow-2xs cursor-pointer w-full sm:w-auto justify-center"
                   >
-                    <span>🖨️</span>
-                    <span className="hidden sm:inline">Print/PDF</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                    <span className="hidden sm:inline">Print / PDF</span>
                     <span className="sm:hidden">Print</span>
                   </button>
 
                   {analyticsViewMode === 'quarter' && selectedAnalyticsQuarter && (
                     <button
                       onClick={exportQuarterFinalReportCsv}
-                      className="px-3 sm:px-4 py-1.5 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded transition-colors flex items-center gap-1 sm:gap-2 text-xs sm:text-base w-full sm:w-auto justify-center"
+                      className="px-3.5 sm:px-4 py-1.5 sm:py-2 bg-[#00629B] hover:bg-[#00629B]/90 text-white rounded-lg transition-colors flex items-center gap-1.5 text-xs sm:text-sm font-semibold shadow-2xs cursor-pointer w-full sm:w-auto justify-center"
                     >
-                      <span>⬇️</span>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
                       <span className="hidden sm:inline">Export Final Report CSV</span>
-                      <span className="sm:hidden">CSV</span>
+                      <span className="sm:hidden">Export CSV</span>
                     </button>
                   )}
                 </div>
@@ -2829,7 +3022,7 @@ export default function CoachDashboard() {
               
               {/* Add month/quarter info for print */}
               <div className="mb-3 sm:mb-4">
-                <h3 className="text-sm sm:text-lg font-semibold text-gray-800">
+                <h3 className="text-sm sm:text-base font-bold text-[#182B49]">
                   {analyticsViewMode === 'month' 
                     ? `${new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} Attendance`
                     : selectedAnalyticsQuarter 
@@ -2840,135 +3033,137 @@ export default function CoachDashboard() {
               </div>
               
               {/* Legend */}
-              <div className="print-controls flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 text-[10px] sm:text-sm mb-4 sm:mb-6 p-2 sm:p-4 bg-gray-100 rounded-lg border">
-                <span className="font-bold text-gray-900 text-xs sm:text-sm">Legend:</span>
-                <div className="flex flex-wrap gap-2 sm:gap-6">
-                  <span className="flex items-center gap-1 font-semibold"><span className="text-green-700 text-sm sm:text-lg">✓</span> <span className="text-gray-800">On Time</span></span>
-                  <span className="flex items-center gap-1 font-semibold"><span className="text-yellow-700 text-sm sm:text-lg">L</span> <span className="text-gray-800">Late</span></span>
-                  <span className="flex items-center gap-1 font-semibold"><span className="text-green-500 text-sm sm:text-lg">J</span> <span className="text-gray-800">Late (J)</span></span>
-                  <span className="flex items-center gap-1 font-semibold"><span className="text-blue-700 text-sm sm:text-lg">E</span> <span className="text-gray-800">Excused</span></span>
-                  <span className="flex items-center gap-1 font-semibold"><span className="text-red-700 text-sm sm:text-lg">X</span> <span className="text-gray-800">Missing</span></span>
-                  <span className="flex items-center gap-1 font-semibold"><span className="bg-gray-200 px-1 sm:px-2 py-0.5 sm:py-1 rounded text-gray-600 text-[8px] sm:text-xs">Empty</span> <span className="text-gray-800">No Prac</span></span>
-                  <span className="flex items-center gap-1 font-semibold"><span className="text-purple-700 text-sm sm:text-lg">—</span> <span className="text-gray-800">Not Marked</span></span>
+              <div className="print-controls flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 text-xs mb-4 sm:mb-6 p-3 sm:p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="font-bold text-[#182B49] text-xs sm:text-sm">Legend:</span>
+                <div className="flex flex-wrap gap-2.5 sm:gap-6">
+                  <span className="flex items-center gap-1.5 font-semibold"><span className="text-emerald-700 text-sm sm:text-base">✓</span> <span className="text-slate-700">On Time</span></span>
+                  <span className="flex items-center gap-1.5 font-semibold"><span className="text-amber-700 text-sm sm:text-base">L</span> <span className="text-slate-700">Late</span></span>
+                  <span className="flex items-center gap-1.5 font-semibold"><span className="text-emerald-500 text-sm sm:text-base">J</span> <span className="text-slate-700">Late (J)</span></span>
+                  <span className="flex items-center gap-1.5 font-semibold"><span className="text-blue-700 text-sm sm:text-base">E</span> <span className="text-slate-700">Excused</span></span>
+                  <span className="flex items-center gap-1.5 font-semibold"><span className="text-rose-700 text-sm sm:text-base">X</span> <span className="text-slate-700">Missing</span></span>
+                  <span className="flex items-center gap-1.5 font-semibold"><span className="bg-slate-200 px-1.5 py-0.5 rounded text-slate-600 text-[10px] font-medium">Empty</span> <span className="text-slate-700">No Prac</span></span>
+                  <span className="flex items-center gap-1.5 font-semibold"><span className="text-purple-700 text-sm sm:text-base">—</span> <span className="text-slate-700">Not Marked</span></span>
                 </div>
               </div>
             </div>
 
             {analyticsViewMode === 'quarter' && selectedAnalyticsQuarter && (
               <div className="mb-6 space-y-3 sm:space-y-4">
-                <p className="text-xs sm:text-sm text-gray-600">Quarter-end summary combines Practice and Lift attendance for each athlete and captain.</p>
+                <p className="text-xs sm:text-sm text-slate-500 font-medium">Quarter-end summary combines Practice and Lift attendance for each athlete and captain.</p>
                 {loadingQuarterFinalReport && (
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-gray-600">
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-600 text-sm font-medium animate-pulse">
                     Building quarter final report...
                   </div>
                 )}
 
                 {!loadingQuarterFinalReport && quarterFinalReport && (
                   <>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-3.5">
                       {quarterFinalReport.squadSummaries.map((summary: any) => (
-                        <div key={summary.squadId} className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
-                          <div className="font-semibold text-gray-900 text-sm mb-2">{summary.squadName}</div>
-                          <div className="text-xs text-gray-700">Avg: <span className="font-bold text-blue-700">{summary.averagePercentage}%</span></div>
-                          <div className="text-xs text-gray-700">Attended/Scheduled: {summary.totalAttended}/{summary.totalScheduled}</div>
-                          <div className="text-xs text-gray-700">Missing: {summary.missing}</div>
+                        <div key={summary.squadId} className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-2xs">
+                          <div className="font-bold text-[#182B49] text-sm mb-2">{summary.squadName}</div>
+                          <div className="text-xs text-slate-600 mb-1">Avg: <span className="font-bold text-[#00629B]">{summary.averagePercentage}%</span></div>
+                          <div className="text-xs text-slate-600 mb-0.5">Attended/Scheduled: <span className="font-medium text-slate-800">{summary.totalAttended}/{summary.totalScheduled}</span></div>
+                          <div className="text-xs text-slate-600">Missing: <span className="font-medium text-slate-800">{summary.missing}</span></div>
                         </div>
                       ))}
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3">
-                      <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
-                        <h4 className="font-semibold text-gray-900 mb-2 text-sm">Top Attendance</h4>
-                        <div className="space-y-1">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 sm:gap-3.5">
+                      <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-2xs">
+                        <h4 className="font-bold text-[#182B49] mb-2.5 text-sm">Top Attendance</h4>
+                        <div className="space-y-1.5">
                           {quarterFinalReport.topRankings.map((row: any) => (
-                            <div key={`top-${row.athleteId}`} className="flex items-center justify-between text-sm">
-                              <span className="text-gray-800">{row.name}</span>
-                              <span className="font-semibold text-green-700">{row.overallPercentage}%</span>
+                            <div key={`top-${row.athleteId}`} className="flex items-center justify-between text-xs sm:text-sm py-0.5 border-b border-slate-50 last:border-0">
+                              <span className="text-slate-800 font-medium">{row.name}</span>
+                              <span className="font-bold text-emerald-700">{row.overallPercentage}%</span>
                             </div>
                           ))}
                         </div>
                       </div>
 
-                      <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
-                        <h4 className="font-semibold text-gray-900 mb-2 text-sm">Lowest Attendance</h4>
-                        <div className="space-y-1">
+                      <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-2xs">
+                        <h4 className="font-bold text-[#182B49] mb-2.5 text-sm">Lowest Attendance</h4>
+                        <div className="space-y-1.5">
                           {quarterFinalReport.bottomRankings.map((row: any) => (
-                            <div key={`bottom-${row.athleteId}`} className="flex items-center justify-between text-sm">
-                              <span className="text-gray-800">{row.name}</span>
-                              <span className="font-semibold text-red-700">{row.overallPercentage}%</span>
+                            <div key={`bottom-${row.athleteId}`} className="flex items-center justify-between text-xs sm:text-sm py-0.5 border-b border-slate-50 last:border-0">
+                              <span className="text-slate-800 font-medium">{row.name}</span>
+                              <span className="font-bold text-rose-700">{row.overallPercentage}%</span>
                             </div>
                           ))}
                         </div>
                       </div>
                     </div>
 
-                    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                      <div className="px-3 sm:px-4 py-2.5 sm:py-3 border-b border-gray-200 flex flex-wrap gap-2 items-center">
-                        <span className="text-sm font-semibold text-gray-900">All Athletes Final Table</span>
-                        <select
-                          value={quarterReportSortKey}
-                          onChange={(e) => setQuarterReportSortKey(e.target.value as any)}
-                          className="px-2 py-1 border rounded text-sm text-gray-900"
-                        >
-                          <option value="overallPercentage">Sort: Overall %</option>
-                          <option value="overallCoveragePercentage">Sort: Coverage %</option>
-                          <option value="overallAttended">Sort: Attended</option>
-                          <option value="overallScheduled">Sort: Scheduled</option>
-                          <option value="name">Sort: Name</option>
-                          <option value="squad">Sort: Squad</option>
-                        </select>
-                        <button
-                          onClick={() => setQuarterReportSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
-                          className="px-2 py-1 border rounded text-sm text-gray-900 hover:bg-gray-50"
-                        >
-                          {quarterReportSortDirection === 'asc' ? 'Ascending' : 'Descending'}
-                        </button>
+                    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                      <div className="px-3 sm:px-4 py-2.5 sm:py-3 border-b border-slate-200 bg-slate-50/50 flex flex-wrap gap-2.5 items-center justify-between">
+                        <span className="text-sm font-bold text-[#182B49]">All Athletes Final Table</span>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={quarterReportSortKey}
+                            onChange={(e) => setQuarterReportSortKey(e.target.value as any)}
+                            className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs sm:text-sm text-slate-800 bg-white font-medium shadow-2xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#182B49]"
+                          >
+                            <option value="overallPercentage">Sort: Overall %</option>
+                            <option value="overallCoveragePercentage">Sort: Coverage %</option>
+                            <option value="overallAttended">Sort: Attended</option>
+                            <option value="overallScheduled">Sort: Scheduled</option>
+                            <option value="name">Sort: Name</option>
+                            <option value="squad">Sort: Squad</option>
+                          </select>
+                          <button
+                            onClick={() => setQuarterReportSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+                            className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs sm:text-sm text-slate-700 bg-white hover:bg-slate-50 font-medium shadow-2xs cursor-pointer transition"
+                          >
+                            {quarterReportSortDirection === 'asc' ? 'Ascending' : 'Descending'}
+                          </button>
+                        </div>
                       </div>
 
                       <div className="block md:hidden p-3 space-y-2">
                         {getSortedQuarterRows().map((row: any) => (
-                          <div key={`mobile-${row.athleteId}`} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                          <div key={`mobile-${row.athleteId}`} className="border border-slate-200/90 rounded-xl p-3.5 bg-white shadow-2xs">
                             <div className="flex items-center justify-between mb-1">
-                              <div className="text-sm font-semibold text-gray-900">{row.name} {row.role === 'captain' ? '🔱' : ''}</div>
-                              <div className="text-sm font-bold text-blue-700">{row.overallPercentage}%</div>
+                              <div className="text-sm font-bold text-[#182B49]">{row.name} {row.role === 'captain' ? '🔱' : ''}</div>
+                              <div className="text-sm font-bold text-[#00629B]">{row.overallPercentage}%</div>
                             </div>
-                            <div className="text-xs text-gray-600 mb-2">{row.squadName}</div>
+                            <div className="text-xs text-slate-500 font-medium mb-2">{row.squadName}</div>
                             <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div className="text-gray-700">Attended: <span className="font-semibold text-gray-900">{row.overallAttended}</span></div>
-                              <div className="text-gray-700">Scheduled: <span className="font-semibold text-gray-900">{row.overallScheduled}</span></div>
-                              <div className="text-gray-700">Practice: <span className="font-semibold text-gray-900">{row.practicePercentage}%</span></div>
-                              <div className="text-gray-700">Lift: <span className="font-semibold text-gray-900">{row.liftPercentage}%</span></div>
-                              <div className="text-gray-700 col-span-2">Coverage: <span className="font-semibold text-gray-900">{row.overallCoveragePercentage}%</span> ({row.overallMarked}/{row.overallScheduled} marked)</div>
+                              <div className="text-slate-600">Attended: <span className="font-semibold text-slate-900">{row.overallAttended}</span></div>
+                              <div className="text-slate-600">Scheduled: <span className="font-semibold text-slate-900">{row.overallScheduled}</span></div>
+                              <div className="text-slate-600">Practice: <span className="font-semibold text-slate-900">{row.practicePercentage}%</span></div>
+                              <div className="text-slate-600">Lift: <span className="font-semibold text-slate-900">{row.liftPercentage}%</span></div>
+                              <div className="text-slate-600 col-span-2">Coverage: <span className="font-semibold text-slate-900">{row.overallCoveragePercentage}%</span> ({row.overallMarked}/{row.overallScheduled} marked)</div>
                             </div>
                           </div>
                         ))}
                       </div>
 
                       <div className="hidden md:block overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead className="bg-gray-50">
+                        <table className="w-full text-xs sm:text-sm">
+                          <thead className="bg-slate-50 text-slate-600 uppercase text-[11px] font-semibold tracking-wider border-b border-slate-200">
                             <tr>
-                              <th className="text-left px-3 py-2 text-gray-700">Name</th>
-                              <th className="text-left px-3 py-2 text-gray-700">Squad</th>
-                              <th className="text-right px-3 py-2 text-gray-700">Overall %</th>
-                              <th className="text-right px-3 py-2 text-gray-700">Coverage %</th>
-                              <th className="text-right px-3 py-2 text-gray-700">Attended</th>
-                              <th className="text-right px-3 py-2 text-gray-700">Scheduled</th>
-                              <th className="text-right px-3 py-2 text-gray-700">Practice %</th>
-                              <th className="text-right px-3 py-2 text-gray-700">Lift %</th>
+                              <th className="text-left px-3.5 py-2.5">Name</th>
+                              <th className="text-left px-3.5 py-2.5">Squad</th>
+                              <th className="text-right px-3.5 py-2.5">Overall %</th>
+                              <th className="text-right px-3.5 py-2.5">Coverage %</th>
+                              <th className="text-right px-3.5 py-2.5">Attended</th>
+                              <th className="text-right px-3.5 py-2.5">Scheduled</th>
+                              <th className="text-right px-3.5 py-2.5">Practice %</th>
+                              <th className="text-right px-3.5 py-2.5">Lift %</th>
                             </tr>
                           </thead>
-                          <tbody>
+                          <tbody className="divide-y divide-slate-100">
                             {getSortedQuarterRows().map((row: any) => (
-                              <tr key={row.athleteId} className="border-t border-gray-100">
-                                <td className="px-3 py-2 text-gray-900">{row.name} {row.role === 'captain' ? '🔱' : ''}</td>
-                                <td className="px-3 py-2 text-gray-700">{row.squadName}</td>
-                                <td className="px-3 py-2 text-right font-semibold text-blue-700">{row.overallPercentage}%</td>
-                                <td className="px-3 py-2 text-right font-semibold text-indigo-700">{row.overallCoveragePercentage}%</td>
-                                <td className="px-3 py-2 text-right text-gray-900">{row.overallAttended}</td>
-                                <td className="px-3 py-2 text-right text-gray-900">{row.overallScheduled}</td>
-                                <td className="px-3 py-2 text-right text-gray-900">{row.practicePercentage}%</td>
-                                <td className="px-3 py-2 text-right text-gray-900">{row.liftPercentage}%</td>
+                              <tr key={row.athleteId} className="hover:bg-slate-50/80 transition">
+                                <td className="px-3.5 py-2.5 font-medium text-slate-900">{row.name} {row.role === 'captain' ? '🔱' : ''}</td>
+                                <td className="px-3.5 py-2.5 text-slate-600">{row.squadName}</td>
+                                <td className="px-3.5 py-2.5 text-right font-bold text-[#00629B]">{row.overallPercentage}%</td>
+                                <td className="px-3.5 py-2.5 text-right font-semibold text-slate-700">{row.overallCoveragePercentage}%</td>
+                                <td className="px-3.5 py-2.5 text-right text-slate-800">{row.overallAttended}</td>
+                                <td className="px-3.5 py-2.5 text-right text-slate-800">{row.overallScheduled}</td>
+                                <td className="px-3.5 py-2.5 text-right text-slate-800">{row.practicePercentage}%</td>
+                                <td className="px-3.5 py-2.5 text-right text-slate-800">{row.liftPercentage}%</td>
                               </tr>
                             ))}
                           </tbody>
@@ -2981,19 +3176,19 @@ export default function CoachDashboard() {
             )}
             
             {/* Attendance Grid */}
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse border border-gray-300">
+            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
+              <table className="w-full border-collapse border border-slate-200">
                 <thead>
-                  <tr className="bg-gray-100">
-                    <th className="border border-gray-300 px-1 sm:px-3 py-1 sm:py-2 text-left font-semibold text-gray-900 min-w-[80px] sm:min-w-[150px] text-[10px] sm:text-base">
+                  <tr className="bg-slate-50 text-slate-700">
+                    <th className="border border-slate-200 px-2 sm:px-3 py-1.5 sm:py-2 text-left font-bold text-[#182B49] min-w-[80px] sm:min-w-[150px] text-xs sm:text-sm">
                       Team Member
                     </th>
                     {getMonthDays().map((date, index) => (
-                      <th key={index} className="border border-gray-300 px-1 sm:px-2 py-1 sm:py-2 text-center font-semibold text-gray-900 min-w-[25px] sm:min-w-[40px]">
-                        <div className="text-[8px] sm:text-xs">
+                      <th key={index} className="border border-slate-200 px-1 sm:px-2 py-1.5 sm:py-2 text-center font-semibold text-slate-700 min-w-[26px] sm:min-w-[40px]">
+                        <div className="text-[9px] sm:text-xs text-slate-500">
                           {date.toLocaleDateString('en-US', { weekday: 'short' })}
                         </div>
-                        <div className="text-[10px] sm:text-sm">
+                        <div className="text-[11px] sm:text-sm font-bold text-slate-800">
                           {date.getDate()}
                         </div>
                       </th>
@@ -3005,25 +3200,25 @@ export default function CoachDashboard() {
                     <Fragment key={squad.id}>
                       {/* Squad Header Row */}
                       <tr>
-                        <td colSpan={getMonthDays().length + 1} className="border border-gray-300 px-2 sm:px-3 py-1 sm:py-2 bg-blue-50 font-bold text-blue-900 text-xs sm:text-base">
+                        <td colSpan={getMonthDays().length + 1} className="border border-slate-200 px-2 sm:px-3.5 py-1.5 sm:py-2 bg-[#182B49]/5 font-bold text-[#182B49] text-xs sm:text-sm">
                           {squad.displayName}
                         </td>
                       </tr>
                       
                       {/* Squad Members */}
                       {squad.members.map((member: any) => (
-                        <tr key={member.id} className="hover:bg-gray-50">
-                          <td className="border border-gray-300 px-1 sm:px-3 py-1 sm:py-2 font-medium text-gray-900 text-[10px] sm:text-base">
+                        <tr key={member.id} className="hover:bg-slate-50/70 transition">
+                          <td className="border border-slate-200 px-2 sm:px-3 py-1.5 sm:py-2 font-medium text-slate-900 text-xs sm:text-sm">
                             <div className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
                               <div className="flex items-center gap-1 sm:gap-2">
                                 <span>{member.full_name}</span>
                                 {analyticsViewMode === 'quarter' && selectedAnalyticsQuarter && (
                                   <button
                                     onClick={() => calculateAthleteQuarterStats(member.id, member.full_name)}
-                                    className="text-blue-600 hover:text-blue-800 transition-colors"
+                                    className="text-[#00629B] hover:text-[#182B49] transition-colors"
                                     title="View quarter statistics"
                                   >
-                                    <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                                     </svg>
                                   </button>
@@ -3046,19 +3241,23 @@ export default function CoachDashboard() {
                             return (
                               <td 
                                 key={dateIndex} 
-                                className={`border border-gray-300 px-1 sm:px-2 py-1 sm:py-2 text-center font-bold text-[10px] sm:text-base ${colorClass} relative group cursor-help`}
+                                className={`border border-slate-200 px-1 sm:px-2 py-1 sm:py-2 text-center font-bold text-[10px] sm:text-base ${colorClass} relative group cursor-help`}
                                 title={notes || undefined}
                               >
                                 <div className="relative inline-block">
                                   {symbol}
                                   {notes && (
-                                    <span className="absolute -top-1 -right-1 text-[8px]">📝</span>
+                                    <span className="absolute -top-1 -right-1 text-[8px] text-slate-600">
+                                      <svg className="w-2.5 h-2.5 inline" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                      </svg>
+                                    </span>
                                   )}
                                 </div>
                                 {notes && (
-                                  <div className="hidden group-hover:block absolute z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 -translate-y-full -mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap max-w-xs">
+                                  <div className="hidden group-hover:block absolute z-10 bg-slate-900 text-white text-xs rounded-lg px-2.5 py-1.5 -translate-y-full -mt-2 left-1/2 -translate-x-1/2 whitespace-nowrap max-w-xs shadow-lg">
                                     {notes}
-                                    <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+                                    <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-900"></div>
                                   </div>
                                 )}
                               </td>
@@ -3070,7 +3269,7 @@ export default function CoachDashboard() {
                       {/* Spacer row between squads (except for last squad) */}
                       {squadIndex < squads.length - 1 && (
                         <tr>
-                          <td colSpan={getMonthDays().length + 1} className="border-0 py-2"></td>
+                          <td colSpan={getMonthDays().length + 1} className="border-0 py-1.5 bg-slate-50/50"></td>
                         </tr>
                       )}
                     </Fragment>
@@ -3080,8 +3279,8 @@ export default function CoachDashboard() {
             </div>
             
             {/* Summary Statistics */}
-            <div className="print-controls mt-4 sm:mt-6 p-2 sm:p-4 bg-gray-50 rounded-lg">
-              <h3 className="font-semibold text-gray-900 mb-2 text-sm sm:text-base">
+            <div className="print-controls mt-4 sm:mt-6 p-3 sm:p-5 bg-slate-50 rounded-xl border border-slate-200 shadow-2xs">
+              <h3 className="font-bold text-[#182B49] mb-3 text-sm sm:text-base">
                 {analyticsViewMode === 'quarter' 
                   ? selectedAnalyticsQuarter 
                     ? `${quarters.find(q => q.id === selectedAnalyticsQuarter)?.name || 'Quarter'} Summary`
@@ -3089,9 +3288,9 @@ export default function CoachDashboard() {
                   : `${new Date(selectedYear, selectedMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} Summary`
                 }
               </h3>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-4 text-[10px] sm:text-sm">
-                <div className="text-center">
-                  <div className="text-lg sm:text-2xl font-bold text-green-600">
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2.5 sm:gap-4 text-xs sm:text-sm">
+                <div className="text-center bg-white p-3 rounded-lg border border-slate-200/80 shadow-2xs">
+                  <div className="text-lg sm:text-2xl font-bold text-emerald-700">
                     {(() => {
                       // Count on-time attendance for all days (including weekends)
                       let count = 0;
@@ -3106,10 +3305,10 @@ export default function CoachDashboard() {
                       return count;
                     })()}
                   </div>
-                  <div className="text-xs font-medium text-gray-600 mt-1">On Time</div>
+                  <div className="text-xs font-semibold text-slate-600 mt-1">On Time</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-green-600">
+                <div className="text-center bg-white p-3 rounded-lg border border-slate-200/80 shadow-2xs">
+                  <div className="text-lg sm:text-2xl font-bold text-emerald-600">
                     {(() => {
                       // Count justified late attendance for all days
                       let count = 0;
@@ -3124,10 +3323,10 @@ export default function CoachDashboard() {
                       return count;
                     })()}
                   </div>
-                  <div className="text-xs font-medium text-gray-600 mt-1">Late (Justified)</div>
+                  <div className="text-xs font-semibold text-slate-600 mt-1">Late (Justified)</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-yellow-600">
+                <div className="text-center bg-white p-3 rounded-lg border border-slate-200/80 shadow-2xs">
+                  <div className="text-lg sm:text-2xl font-bold text-amber-600">
                     {(() => {
                       // Count late attendance for all days (excluding justified)
                       let count = 0;
@@ -3142,10 +3341,10 @@ export default function CoachDashboard() {
                       return count;
                     })()}
                   </div>
-                  <div className="text-xs font-medium text-gray-600 mt-1">Late</div>
+                  <div className="text-xs font-semibold text-slate-600 mt-1">Late</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-blue-600">
+                <div className="text-center bg-white p-3 rounded-lg border border-slate-200/80 shadow-2xs">
+                  <div className="text-lg sm:text-2xl font-bold text-blue-700">
                     {(() => {
                       // Count excused attendance for all days (including weekends)
                       let count = 0;
@@ -3162,10 +3361,10 @@ export default function CoachDashboard() {
                       return count;
                     })()}
                   </div>
-                  <div className="text-gray-600">Excused</div>
+                  <div className="text-xs font-semibold text-slate-600 mt-1">Excused</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-red-600">
+                <div className="text-center bg-white p-3 rounded-lg border border-slate-200/80 shadow-2xs">
+                  <div className="text-lg sm:text-2xl font-bold text-rose-700">
                     {(() => {
                       // Count missing attendance for all days (including weekends)
                       let count = 0;
@@ -3182,10 +3381,10 @@ export default function CoachDashboard() {
                       return count;
                     })()}
                   </div>
-                  <div className="text-gray-600">Missing</div>
+                  <div className="text-xs font-semibold text-slate-600 mt-1">Missing</div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-gray-600">
+                <div className="text-center bg-white p-3 rounded-lg border border-slate-200/80 shadow-2xs col-span-3 sm:col-span-5">
+                  <div className="text-lg sm:text-2xl font-bold text-purple-700">
                     {(() => {
                       // Count "Not Marked" - for all days that have practice scheduled but no attendance record
                       let notMarkedCount = 0;
@@ -3207,7 +3406,7 @@ export default function CoachDashboard() {
                       return notMarkedCount;
                     })()}
                   </div>
-                  <div className="text-gray-600">Not Marked</div>
+                  <div className="text-xs font-semibold text-slate-600 mt-1">Not Marked</div>
                 </div>
               </div>
             </div>

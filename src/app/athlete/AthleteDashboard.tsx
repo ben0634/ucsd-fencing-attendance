@@ -607,15 +607,24 @@ export default function AthleteDashboard() {
         if (currentQuarter) {
           setSelectedQuarter(currentQuarter.id);
         } else if (allQuarters && allQuarters.length > 0) {
-          // Fall back to the most recently started quarter before today,
-          // or the first upcoming quarter if none have started yet
-          const mostRecentlyStarted = allQuarters
-            .filter((q: any) => new Date(q.start_date + 'T00:00:00') <= today)
+          // If between quarters, prioritize the next upcoming quarter (e.g. Fall starting soon)
+          const upcomingQuarters = allQuarters
+            .filter((q: any) => new Date(q.start_date + 'T00:00:00') > today)
             .sort((a: any, b: any) =>
-              new Date(b.start_date + 'T00:00:00').getTime() - new Date(a.start_date + 'T00:00:00').getTime()
-            )[0];
-          const fallback = mostRecentlyStarted || allQuarters[0];
-          setSelectedQuarter(fallback.id);
+              new Date(a.start_date + 'T00:00:00').getTime() - new Date(b.start_date + 'T00:00:00').getTime()
+            );
+
+          if (upcomingQuarters.length > 0) {
+            setSelectedQuarter(upcomingQuarters[0].id);
+          } else {
+            const mostRecentlyStarted = allQuarters
+              .filter((q: any) => new Date(q.start_date + 'T00:00:00') <= today)
+              .sort((a: any, b: any) =>
+                new Date(b.start_date + 'T00:00:00').getTime() - new Date(a.start_date + 'T00:00:00').getTime()
+              )[0];
+            const fallback = mostRecentlyStarted || allQuarters[0];
+            setSelectedQuarter(fallback.id);
+          }
         }
       }
     } catch (error) {

@@ -92,7 +92,7 @@ export default function LoginPage() {
               UC San Diego Athletics
             </p>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 mt-1">
-              TRITONS FENCING
+              FENCING
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
               Team Attendance &amp; Practice Portal
@@ -163,12 +163,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* Card Footer */}
-        <div className="bg-slate-50 border-t border-slate-100 px-8 py-3 text-center">
-          <p className="text-[11px] text-slate-500 font-medium">
-            UC San Diego NCAA Fencing &bull; Team Roster &amp; Attendance
-          </p>
-        </div>
+
       </div>
     </div>
   );
