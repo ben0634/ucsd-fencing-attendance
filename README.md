@@ -10,22 +10,22 @@ A full-stack athletic attendance management platform built for tracking team pra
 
 ### 1. Coach & Admin Dashboard
 > *Team-wide attendance monitoring, roster compliance, and practice session tracking.*
-<img width="901" height="824" alt="Screenshot 2026-08-31 at 4 28 28 PM" src="https://github.com/user-attachments/assets/80fd7722-a56c-41a4-969f-5bd86237df00" />
-<img width="871" height="596" alt="Screenshot 2026-08-31 at 4 29 22 PM" src="https://github.com/user-attachments/assets/49285b17-ddd5-4d63-bf03-ce3cbd36b6c1" />
+<img width="667" height="674" alt="Screenshot 2026-09-05 at 1 15 56 AM" src="https://github.com/user-attachments/assets/9696a1e3-ce70-4600-b1bf-ea75a679c06a" />
+<img width="600" height="351" alt="Screenshot 2026-09-05 at 1 16 47 AM" src="https://github.com/user-attachments/assets/f17a97be-3586-42ff-8787-935fe43e8235" />
 
 ---
 
 ### 2. Captain Practice Check-In
 > *Squad-level attendance logging (Epee, Foil, Sabre) with real-time sync.*
-<img width="732" height="623" alt="Screenshot 2026-08-31 at 4 30 50 PM" src="https://github.com/user-attachments/assets/79eec383-be64-412b-a15c-b675e43b1285" />
-
+> 
+<img width="637" height="499" alt="Screenshot 2026-09-05 at 1 17 30 AM" src="https://github.com/user-attachments/assets/966ba215-cbd0-4bfd-8f3f-09c2e2cec3ec" />
 
 ---
 
 ### 3. Athlete Participation Portal
 > *Individual athlete session history, participation rates, and personal statistics.*
 
-<img width="383" height="738" alt="Screenshot 2026-08-31 at 4 30 31 PM" src="https://github.com/user-attachments/assets/587db729-7732-4b1c-ad3e-0fdb09ae5a0f" />
+<img width="319" height="587" alt="Screenshot 2026-09-05 at 1 18 34 AM" src="https://github.com/user-attachments/assets/0fe36599-85f0-4225-8def-d3ece016e5c9" />
 
 ---
 
