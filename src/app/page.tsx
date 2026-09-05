@@ -78,13 +78,13 @@ export default function LoginPage() {
         <div className="p-8 sm:p-10">
           {/* Header Branding */}
           <div className="text-center mb-8">
-            <div className="mx-auto w-20 h-20 bg-white rounded-2xl p-2 border border-slate-200 shadow-xs flex items-center justify-center mb-4">
+            <div className="mx-auto w-20 h-20 bg-[#182B49] rounded-2xl p-2 shadow-md border border-slate-700/40 flex items-center justify-center mb-4 overflow-hidden">
               <Image
                 src="/fencing-logo.png"
                 alt="UCSD Fencing Logo"
                 width={72}
                 height={72}
-                className="object-contain"
+                className="object-contain rounded-xl"
                 priority
               />
             </div>

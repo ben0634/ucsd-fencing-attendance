@@ -915,9 +915,7 @@ export default function AthleteDashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
           {/* Brand / Logo */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-white rounded-xl p-1 flex items-center justify-center shrink-0 shadow-xs">
-              <img src="/fencing-logo.png" alt="UCSD Fencing" className="w-7 h-7 object-contain" />
-            </div>
+            <img src="/fencing-logo.png" alt="UCSD Fencing" className="w-10 h-10 object-contain shrink-0" />
             <div>
               <span className="text-[10px] font-bold tracking-widest text-[#FFCD00] uppercase block leading-none">
                 UC San Diego
