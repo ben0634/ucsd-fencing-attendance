@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     // Get the authorization header
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-      console.error('Missing or invalid authorization header:', authHeader ? 'present but invalid format' : 'missing');
+      console.error('Unauthorized request');
       return NextResponse.json({ error: 'Missing or invalid authorization header' }, { status: 401 });
     }
 
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     }
     
     if (!user) {
-      console.error('No user found from token');
+      console.error('No authenticated user found');
       return NextResponse.json({ error: 'User not found' }, { status: 401 });
     }
 
@@ -177,7 +177,7 @@ export async function GET(request: NextRequest) {
     // Get the authorization header
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-      console.error('GET: Missing or invalid authorization header');
+      console.error('GET: Unauthorized request');
       return NextResponse.json({ error: 'Missing or invalid authorization header' }, { status: 401 });
     }
 
@@ -192,7 +192,7 @@ export async function GET(request: NextRequest) {
     }
     
     if (!user) {
-      console.error('GET: No user found from token');
+      console.error('GET: No authenticated user found');
       return NextResponse.json({ error: 'User not found' }, { status: 401 });
     }
 

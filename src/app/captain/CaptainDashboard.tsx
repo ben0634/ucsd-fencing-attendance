@@ -316,13 +316,11 @@ export default function CaptainDashboard() {
         const accessToken = sessionData.session?.access_token;
         
         if (!accessToken) {
-          console.error('No access token available');
+          console.error('Authentication session unavailable');
           setAthletes([]);
           setLoading(false);
           return;
         }
-        
-        console.log('Access token available, length:', accessToken.length);
         
         // Call the API endpoint
         console.log('Calling API endpoint...');
@@ -850,19 +848,6 @@ export default function CaptainDashboard() {
       percentage: scoped.percentage,
     });
   }, [finalQuarterReport, sessionType]);
-
-  const isDateWithinAnyQuarter = (date: Date) => {
-    if (!quarters.length) return true;
-
-    const checkDate = new Date(date);
-    checkDate.setHours(12, 0, 0, 0);
-
-    return quarters.some((q: any) => {
-      const start = new Date(q.start_date + 'T00:00:00');
-      const end = new Date(q.end_date + 'T23:59:59');
-      return checkDate >= start && checkDate <= end;
-    });
-  };
 
   // Check if there's practice for a squad on a given date
   const hasPractice = (date: Date) => {
@@ -1888,7 +1873,6 @@ export default function CaptainDashboard() {
                       // Calendar days
                       for (let day = 1; day <= daysInMonth; day++) {
                         const date = new Date(calendarYear, calendarMonth, day);
-                        const dateString = getLocalDateString(date);
                         const isToday = date.toDateString() === today.toDateString();
                         const hasScheduledPractice = hasPractice(date);
                         const status = getAttendanceStatus(user.id, date);

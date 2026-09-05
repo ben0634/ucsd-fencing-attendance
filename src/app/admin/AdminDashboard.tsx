@@ -71,7 +71,7 @@ export default function AdminDashboard() {
       const accessToken = sessionData.session?.access_token;
       
       if (!accessToken) {
-        console.error('No access token available');
+        console.error('Authentication session unavailable');
         return;
       }
 

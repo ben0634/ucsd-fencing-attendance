@@ -42,7 +42,6 @@ export default function AnalyticsDashboard() {
       }
     }
   }, [viewMode, quarters]);
-  const [calendarViewMode, setCalendarViewMode] = useState<'month' | 'quarter'>('month');
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedCalendarQuarter, setSelectedCalendarQuarter] = useState<string | null>(null);
@@ -390,14 +389,6 @@ export default function AnalyticsDashboard() {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
-  };
-
-  const getCalendarAttendanceStatus = (athleteId: string, date: Date) => {
-    const dateString = getLocalDateString(date);
-    const record = attendanceData.find(
-      (a: any) => a.athlete_id === athleteId && a.date === dateString
-    );
-    return record?.status || null;
   };
 
   const formatStatusSymbol = (status: string | null) => {

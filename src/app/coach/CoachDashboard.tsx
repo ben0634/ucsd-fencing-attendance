@@ -11,7 +11,6 @@ export default function CoachDashboard() {
   const [squads, setSquads] = useState<any[]>([]);
   const [currentWeekOffset, setCurrentWeekOffset] = useState(0);
   const [attendanceData, setAttendanceData] = useState<any[]>([]);
-  const [selectedSquad, setSelectedSquad] = useState<string | null>(null);
   const [markingAttendance, setMarkingAttendance] = useState<{[key: string]: boolean}>({});
   const [message, setMessage] = useState<string>('');
   const [viewMode, setViewMode] = useState<'overview' | 'attendance' | 'captains' | 'analytics' | 'practice'>('overview');
@@ -22,10 +21,6 @@ export default function CoachDashboard() {
   const [practiceSchedules, setPracticeSchedules] = useState<{[key: string]: string[]}>({});
   const [customNoPracticeDays, setCustomNoPracticeDays] = useState<{[key: string]: string[]}>({});
   const [customPracticeDays, setCustomPracticeDays] = useState<{[key: string]: string[]}>({});
-  // Cache per sessionType
-  const [practiceScheduleCache, setPracticeScheduleCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
-  const [customNoPracticeDaysCache, setCustomNoPracticeDaysCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
-  const [customPracticeDaysCache, setCustomPracticeDaysCache] = useState<{[k in 'practice' | 'lift']: {[key: string]: string[]}}>({ practice: {}, lift: {} });
   const [updatingSchedule, setUpdatingSchedule] = useState<{[key: string]: boolean}>({});
   const [showCustomDaysModal, setShowCustomDaysModal] = useState(false);
   const [customDayType, setCustomDayType] = useState<'no-practice' | 'practice'>('no-practice');
@@ -183,19 +178,6 @@ export default function CoachDashboard() {
       )[0];
 
     return (mostRecentlyStarted || quarters[0])?.id || null;
-  };
-
-  const isDateWithinAnyQuarter = (date: Date) => {
-    if (!quarters.length) return true;
-
-    const checkDate = new Date(date);
-    checkDate.setHours(12, 0, 0, 0);
-
-    return quarters.some((q: any) => {
-      const start = new Date(q.start_date + 'T00:00:00');
-      const end = new Date(q.end_date + 'T23:59:59');
-      return checkDate >= start && checkDate <= end;
-    });
   };
 
   // When sessionType toggles, refresh schedules for selected quarter scope
@@ -517,7 +499,6 @@ export default function CoachDashboard() {
       // Month view
       const year = selectedYear;
       const month = selectedMonth;
-      const firstDay = new Date(year, month, 1);
       const lastDay = new Date(year, month + 1, 0);
       
       const days = [];
@@ -661,22 +642,6 @@ export default function CoachDashboard() {
     }
   };
 
-  const goToPreviousMonth = () => {
-    setSelectedMonth(prev => prev === 0 ? 11 : prev - 1);
-    setSelectedYear(prev => prev === 0 ? 2023 : prev - 1);
-  };
-
-  const goToNextMonth = () => {
-    setSelectedMonth(prev => prev === 11 ? 0 : prev + 1);
-    setSelectedYear(prev => prev === 2023 ? 2024 : prev + 1);
-  };
-
-  const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const [year, month] = e.target.value.split('-').map(Number);
-    setSelectedYear(year);
-    setSelectedMonth(month);
-  };
-
   // Calculate attendance statistics
   const calculateAttendanceStats = () => {
     const stats: { [squadId: string]: any } = {};
@@ -695,11 +660,7 @@ export default function CoachDashboard() {
       };
 
       // Get days that actually have practice scheduled for this squad (including weekends)
-      const practiceWeekdays = weekDates.filter((date, index) => {
-        const dayName = dayNames[index];
-        // Check if practice is scheduled for this squad on this date (including weekends)
-        return hasPractice(squad.id, date);
-      });
+      const practiceWeekdays = weekDates.filter(date => hasPractice(squad.id, date));
 
       squadStats.totalPossibleAttendance = squad.members.length * practiceWeekdays.length;
 
@@ -875,7 +836,7 @@ export default function CoachDashboard() {
       const accessToken = sessionData.session?.access_token;
       
       if (!accessToken) {
-        console.error('No access token for fetching schedules');
+        console.error('Authentication session unavailable for fetching schedules');
         return;
       }
       let quarterParam = '';
@@ -922,10 +883,6 @@ export default function CoachDashboard() {
         setPracticeSchedules(scheduleMap);
         setCustomNoPracticeDays(customNoPracticeMap);
         setCustomPracticeDays(customPracticeMap);
-        // cache per session type
-        setPracticeScheduleCache(prev => ({ ...prev, [sessionType]: scheduleMap }));
-        setCustomNoPracticeDaysCache(prev => ({ ...prev, [sessionType]: customNoPracticeMap }));
-        setCustomPracticeDaysCache(prev => ({ ...prev, [sessionType]: customPracticeMap }));
 
         const responseScope =
           (viewMode === 'practice' && selectedPracticeQuarterScope !== 'global')
@@ -980,10 +937,6 @@ export default function CoachDashboard() {
 
       if (response.ok) {
         setPracticeSchedules(prev => ({ ...prev, [squadId]: practiceDays }));
-        setPracticeScheduleCache(prev => ({
-          ...prev,
-          [sessionType]: { ...prev[sessionType], [squadId]: practiceDays }
-        }));
         setMessage('Practice schedule updated successfully');
         setTimeout(() => setMessage(''), 3000);
       } else {
@@ -1059,16 +1012,8 @@ export default function CoachDashboard() {
         
         if (customDayType === 'no-practice') {
           setCustomNoPracticeDays(prev => ({ ...prev, [squadId]: newCustomDays }));
-          setCustomNoPracticeDaysCache(prev => ({
-            ...prev,
-            [sessionType]: { ...prev[sessionType], [squadId]: newCustomDays }
-          }));
         } else {
           setCustomPracticeDays(prev => ({ ...prev, [squadId]: newCustomDays }));
-          setCustomPracticeDaysCache(prev => ({
-            ...prev,
-            [sessionType]: { ...prev[sessionType], [squadId]: newCustomDays }
-          }));
         }
         
         // Update in database - pass the NEW custom days directly
@@ -1106,7 +1051,7 @@ export default function CoachDashboard() {
       const accessToken = sessionData.session?.access_token;
       
       if (!accessToken) {
-        console.error('No access token available');
+        console.error('Authentication session unavailable');
         return;
       }
 
@@ -1143,10 +1088,6 @@ export default function CoachDashboard() {
       if (dayType === 'no-practice') {
         const newDays = (customNoPracticeDays[squadId] || []).filter(date => date !== dateToRemove);
         setCustomNoPracticeDays(prev => ({ ...prev, [squadId]: newDays }));
-        setCustomNoPracticeDaysCache(prev => ({
-          ...prev,
-            [sessionType]: { ...prev[sessionType], [squadId]: newDays }
-        }));
         await updatePracticeScheduleWithCustomDays(
           squadId, 
           practiceSchedules[squadId] || [], 
@@ -1157,10 +1098,6 @@ export default function CoachDashboard() {
       } else {
         const newDays = (customPracticeDays[squadId] || []).filter(date => date !== dateToRemove);
         setCustomPracticeDays(prev => ({ ...prev, [squadId]: newDays }));
-        setCustomPracticeDaysCache(prev => ({
-          ...prev,
-            [sessionType]: { ...prev[sessionType], [squadId]: newDays }
-        }));
         await updatePracticeScheduleWithCustomDays(
           squadId, 
           practiceSchedules[squadId] || [], 
@@ -1707,9 +1644,6 @@ export default function CoachDashboard() {
 
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData.session?.access_token;
-      
-      console.log('Access token:', accessToken ? 'present' : 'missing');
-      
       if (!accessToken) {
         setMessage('Authentication error');
         setTimeout(() => setMessage(''), 3000);
@@ -2003,23 +1937,6 @@ export default function CoachDashboard() {
                     
                     <div className="space-y-1.5 sm:space-y-2 mb-3 sm:mb-4">
                       {squad.members.map((member: any) => {
-                        // Get this week's attendance summary for this member - include all days (including weekends)
-                        const practiceWeekdays = weekDates.filter((date, index) => {
-                          const dayName = dayNames[index];
-                          // Check if practice is scheduled for this squad on this date (including weekends)
-                          return hasPractice(squad.id, date);
-                        });
-                        
-                        const weekAttendance = practiceWeekdays.map(date => getAttendanceStatus(member.id, date));
-                        const attendanceCount = {
-                          onTime: weekAttendance.filter(s => s === 'on-time').length,
-                          lateJustified: weekAttendance.filter(s => s === 'late-justified').length,
-                          late: weekAttendance.filter(s => s === 'late').length,
-                          excused: weekAttendance.filter(s => s === 'excused').length,
-                          missing: weekAttendance.filter(s => s === 'missing').length,
-                          notMarked: weekAttendance.filter(s => s === null).length
-                        };
-                        
                         // Today's specific status (if current week)
                         const today = new Date();
                         const todayStatus = currentWeekOffset === 0 ? getAttendanceStatus(member.id, today) : null;
@@ -2210,7 +2127,7 @@ export default function CoachDashboard() {
                   <button
                     onClick={() =>
                       setExpandedAttendanceSquads(
-                        squads.reduce((acc: {[key: string]: boolean}, squad, index) => {
+                        squads.reduce((acc: {[key: string]: boolean}, squad) => {
                           acc[squad.id] = false;
                           return acc;
                         }, {})

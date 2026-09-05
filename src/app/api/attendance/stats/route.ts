@@ -4,7 +4,6 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get('userId')
-    const seasonId = searchParams.get('seasonId')
 
     if (!userId) {
       return NextResponse.json(

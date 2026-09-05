@@ -311,19 +311,6 @@ export default function AthleteDashboard() {
     return record?.notes || null;
   };
 
-  const isDateWithinAnyQuarter = (date: Date) => {
-    if (!quarters.length) return true;
-
-    const checkDate = new Date(date);
-    checkDate.setHours(12, 0, 0, 0);
-
-    return quarters.some((q: any) => {
-      const start = new Date(q.start_date + 'T00:00:00');
-      const end = new Date(q.end_date + 'T23:59:59');
-      return checkDate >= start && checkDate <= end;
-    });
-  };
-
   const hasPractice = (date: Date) => {
     if (!user) return true; // Default to showing practice if we don't know
 
@@ -634,37 +621,6 @@ export default function AthleteDashboard() {
     } catch (error) {
       console.error('Error fetching quarters:', error);
     }
-  };
-
-  // Check if athlete has any attendance in quarter date range
-  const checkQuarterHasAttendance = async (quarter: any): Promise<boolean> => {
-    if (!user) return false;
-    
-    const startDate = quarter.start_date;
-    const endDate = quarter.end_date;
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    const accessToken = sessionData.session?.access_token;
-    
-    if (!accessToken) return false;
-
-    const response = await fetch(
-      `/api/attendance?startDate=${startDate}&endDate=${endDate}&sessionType=${sessionType}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    if (response.ok) {
-      const { attendance } = await response.json();
-      const athleteAttendance = attendance?.filter((a: any) => a.athlete_id === user.id) || [];
-      return athleteAttendance.length > 0;
-    }
-    
-    return false;
   };
 
   // Calculate quarter statistics
@@ -1365,7 +1321,6 @@ export default function AthleteDashboard() {
                   // Calendar days
                   for (let day = 1; day <= daysInMonth; day++) {
                     const date = new Date(calendarYear, calendarMonth, day);
-                    const dateString = getLocalDateString(date);
                     const isToday = date.toDateString() === today.toDateString();
                     const hasScheduledPractice = hasPractice(date);
                     const status = getAttendanceStatus(date);
