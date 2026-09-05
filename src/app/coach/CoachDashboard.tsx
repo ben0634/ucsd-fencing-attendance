@@ -1820,7 +1820,7 @@ export default function CoachDashboard() {
   const attendanceStats = calculateAttendanceStats();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-4 sm:p-6">
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
       {showPasswordChange && user && (
         <PasswordChangeModal
           username={user.user_metadata?.username || user.email?.split('@')[0] || ''}
@@ -1833,79 +1833,145 @@ export default function CoachDashboard() {
           }}
         />
       )}
-      
-      <div className="max-w-screen-xl mx-auto">
-        <div className="mb-4 sm:mb-6 flex flex-col gap-3 sm:gap-4">
-          {/* Left: Title & Mode Badge */}
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-yellow-300 leading-tight tracking-tight">
-              Welcome, Coach {user.user_metadata.firstName ?? user.email}
-            </h1>
-            <p className="text-yellow-100 text-sm sm:text-base font-semibold mt-1">UCSD Fencing Team Management</p>
-            {/* Removed mode badge per request */}
+
+      {/* Collegiate Top Navigation Bar */}
+      <header className="bg-[#182B49] text-white border-b border-slate-800 sticky top-0 z-30 shadow-xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+          {/* Brand / Logo */}
+          <div className="flex items-center gap-3">
+            <img src="/fencing-logo.png" alt="UCSD Fencing" className="w-10 h-10 object-contain shrink-0" />
+            <div>
+              <span className="text-[10px] font-bold tracking-widest text-[#FFCD00] uppercase block leading-none">
+                UC San Diego
+              </span>
+              <span className="text-base font-extrabold tracking-tight text-white leading-tight">
+                TRITONS FENCING
+              </span>
+            </div>
+            <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/10 text-slate-200 border border-white/10 ml-2">
+              Coach Portal
+            </span>
           </div>
-          {/* Right: Toolbars */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex bg-white/20 backdrop-blur-sm rounded-xl overflow-hidden border-2 border-white/30 h-10 sm:h-11 shadow-lg">
+
+          {/* Session Switcher (Practice vs Lift) */}
+          <div className="flex items-center bg-slate-900/60 p-1 rounded-xl border border-white/10">
+            <button
+              onClick={() => setSessionType('practice')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                sessionType === 'practice'
+                  ? 'bg-white text-[#182B49] shadow-xs'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              Practice
+            </button>
+            <button
+              onClick={() => setSessionType('lift')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                sessionType === 'lift'
+                  ? 'bg-white text-[#182B49] shadow-xs'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              Lift
+            </button>
+          </div>
+
+          {/* User Meta & Logout */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
+              onClick={() => setShowPasswordChange(true)}
+              className="px-3 py-1.5 rounded-lg border border-white/20 text-xs font-semibold text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              Password
+            </button>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1.5 rounded-lg border border-white/20 text-xs font-semibold text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Horizontal View Modes Navigation Bar */}
+      <nav className="bg-white border-b border-slate-200 sticky top-16 z-20 shadow-2xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto py-2.5 scrollbar-none">
+            {[
+              { key: 'overview', label: 'Team Overview' },
+              { key: 'attendance', label: 'Mark Attendance' },
+              ...(sessionType === 'practice' ? [{ key: 'captains', label: 'Manage Captains' }] : []),
+              { key: 'analytics', label: 'Analytics & Reports' },
+              { key: 'practice', label: 'Schedules & Exceptions' }
+            ].map(tab => (
               <button
-                onClick={() => setSessionType('practice')}
-                className={`px-4 sm:px-6 text-sm sm:text-base font-semibold transition-all duration-200 h-full flex items-center ${sessionType === 'practice' ? 'bg-white text-indigo-600 shadow-md' : 'text-white hover:bg-white/10'}`}
-              >Practice</button>
-              <button
-                onClick={() => setSessionType('lift')}
-                className={`px-4 sm:px-6 text-sm sm:text-base font-semibold transition-all duration-200 h-full flex items-center ${sessionType === 'lift' ? 'bg-white text-indigo-600 shadow-md' : 'text-white hover:bg-white/10'}`}
-              >Lift</button>
+                key={tab.key}
+                onClick={() => setViewMode(tab.key as any)}
+                className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                  viewMode === tab.key
+                    ? 'bg-[#182B49] text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </nav>
+
+      {/* Main Content Container */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8 space-y-6">
+        {/* Welcome & Profile Header Banner */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">
+                Welcome, Coach {user.user_metadata?.firstName ? `${user.user_metadata.firstName}${user.user_metadata.lastName ? ` ${user.user_metadata.lastName}` : ''}` : user.user_metadata?.username || user.email?.split('@')[0] || 'Coach'}
+              </h1>
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200/80">
+                Head Coach
+              </span>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              {[
-                { key: 'overview', label: 'Overview', shortLabel: 'Overview' },
-                { key: 'attendance', label: 'Mark Attendance', shortLabel: 'Attendance' },
-                // Captains management only relevant for practice session type
-                ...(sessionType === 'practice' ? [{ key: 'captains', label: 'Manage Captains', shortLabel: 'Captains' }] : []),
-                { key: 'analytics', label: 'Analytics', shortLabel: 'Analytics' },
-                { key: 'practice', label: 'Practice Management', shortLabel: 'Practice' }
-              ].map(btn => (
-                <button
-                  key={btn.key}
-                  onClick={() => setViewMode(btn.key as any)}
-                  className={`h-10 sm:h-11 px-3 sm:px-5 rounded-xl text-xs sm:text-sm font-semibold transition-all duration-200 flex items-center shadow-md hover:shadow-lg transform hover:scale-105 ${
-                    viewMode === btn.key ? 'bg-white text-indigo-600' : 'bg-indigo-600 hover:bg-indigo-500 text-white border-2 border-white/20'
-                  }`}
-                >
-                  <span className="hidden sm:inline">{btn.label}</span>
-                  <span className="sm:hidden">{btn.shortLabel}</span>
-                </button>
-              ))}
-              <button
-                onClick={handleLogout}
-                className="h-8 sm:h-9 px-2 sm:px-4 rounded-md text-xs sm:text-sm font-medium flex items-center bg-red-500 hover:bg-red-600 text-white transition-colors"
-              >Logout</button>
-            </div>
+            <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
+              UCSD Fencing Team Management &bull; {sessionType === 'practice' ? 'Practice Mode' : 'Lift Mode'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200 px-3.5 py-2 rounded-xl">
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            Session Mode: <span className="text-[#182B49] font-extrabold capitalize">{sessionType}</span>
           </div>
         </div>
 
         {viewMode === 'overview' ? (
           // Team Overview Mode
-          <div className="space-y-4 sm:space-y-6">
-            <div className="bg-white rounded-lg shadow-lg p-3 sm:p-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6 gap-3">
-                <h2 className="text-lg sm:text-xl font-bold text-gray-900">Team Overview</h2>
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 pb-5 border-b border-slate-100 gap-4">
+                <div>
+                  <h2 className="text-lg sm:text-xl font-extrabold text-[#182B49] tracking-tight">Team Overview</h2>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    Weekly roll call and attendance summaries by squad
+                  </p>
+                </div>
                 
                 {/* Week Navigation */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-                  <div className="flex items-center justify-between sm:justify-start gap-2">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex items-center gap-1.5">
                     <button
                       onClick={goToPreviousWeek}
-                      className="px-2 sm:px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs sm:text-sm"
+                      className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
                     >
-                      <span className="hidden sm:inline">← Previous Week</span>
-                      <span className="sm:hidden">← Prev</span>
+                      <span className="hidden sm:inline">&larr; Previous Week</span>
+                      <span className="sm:hidden">&larr; Prev</span>
                     </button>
                     
                     {currentWeekOffset !== 0 && (
                       <button
                         onClick={goToCurrentWeek}
-                        className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-xs sm:text-sm"
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                       >
                         Today
                       </button>
@@ -1913,14 +1979,14 @@ export default function CoachDashboard() {
                     
                     <button
                       onClick={goToNextWeek}
-                      className="px-2 sm:px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs sm:text-sm"
+                      className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
                     >
-                      <span className="hidden sm:inline">Next Week →</span>
-                      <span className="sm:hidden">Next →</span>
+                      <span className="hidden sm:inline">Next Week &rarr;</span>
+                      <span className="sm:hidden">Next &rarr;</span>
                     </button>
                   </div>
                   
-                  <span className="text-xs sm:text-sm font-medium text-gray-700 text-center sm:text-left">
+                  <span className="text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200/80 px-3 py-1.5 rounded-lg text-center">
                     {currentWeekOffset === 0 ? "This Week" : 
                      currentWeekOffset === -1 ? "Last Week" :
                      currentWeekOffset === 1 ? "Next Week" :
@@ -1930,12 +1996,17 @@ export default function CoachDashboard() {
                 </div>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                 {squads.map(squad => (
-                  <div key={squad.id} className="border rounded-lg p-3 sm:p-4 bg-gray-50">
-                    <h3 className="font-bold text-base sm:text-lg text-gray-900 mb-2 sm:mb-3">{squad.displayName}</h3>
+                  <div key={squad.id} className="border border-slate-200/90 rounded-xl p-4 bg-slate-50/50 hover:bg-white hover:border-slate-300 transition-all shadow-2xs">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-extrabold text-base text-[#182B49]">{squad.displayName}</h3>
+                      <span className="text-[11px] font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-md">
+                        {squad.members.length} Athletes
+                      </span>
+                    </div>
                     
-                    <div className="space-y-1.5 sm:space-y-2 mb-3 sm:mb-4">
+                    <div className="space-y-2 mb-4">
                       {squad.members.map((member: any) => {
                         // Today's specific status (if current week)
                         const today = new Date();
@@ -1944,45 +2015,43 @@ export default function CoachDashboard() {
                         const isTodayCurrentWeek = currentWeekOffset === 0;
                         
                         return (
-                          <div key={member.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-xs sm:text-sm gap-1">
-                            <div className="flex items-center gap-1.5 sm:gap-2">
-                              <span className="font-medium text-gray-900">
+                          <div key={member.id} className="flex items-center justify-between text-xs py-1 px-1.5 rounded-lg hover:bg-white transition-colors">
+                            <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                              <span className="font-semibold text-slate-800 truncate">
                                 {member.full_name}
                               </span>
                               {member.role === 'captain' && (
-                                <span className="text-[10px] sm:text-xs bg-blue-100 text-blue-800 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded">
-                                  Captain 🔱
+                                <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-[#00629B] border border-blue-200/60 px-1.5 py-0.5 rounded">
+                                  Captain
                                 </span>
                               )}
                             </div>
                             
                             {/* Today's status only */}
-                            <div className="flex items-center gap-1 sm:gap-2">
-                              {/* Today's status for current week */}
+                            <div className="shrink-0">
                               {isTodayCurrentWeek && (
-                                <div className="text-[10px] sm:text-xs">
+                                <div className="text-[10px]">
                                   {!hasTodayPractice ? (
-                                    <span className="text-gray-400 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded bg-gray-100 font-bold italic">
-                                      <span className="hidden sm:inline">Today: No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
-                                      <span className="sm:hidden">No {sessionType === 'practice' ? 'Prac' : 'Lift'}</span>
+                                    <span className="text-slate-400 px-2 py-0.5 rounded bg-slate-100 font-semibold italic">
+                                      No {sessionType === 'practice' ? 'Practice' : 'Lift'}
                                     </span>
                                   ) : todayStatus ? (
-                                    <span className={`px-1.5 sm:px-2 py-0.5 sm:py-1 rounded font-medium ${
-                                      todayStatus === 'on-time' ? 'bg-green-100 text-green-700' :
-                                      todayStatus === 'late' ? 'bg-yellow-100 text-yellow-700' :
-                                      todayStatus === 'late-justified' ? 'bg-green-100 text-green-700' :
-                                      todayStatus === 'excused' ? 'bg-blue-100 text-blue-700' :
-                                      'bg-red-100 text-red-700'
+                                    <span className={`px-2 py-0.5 rounded font-bold ${
+                                      todayStatus === 'on-time' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                                      todayStatus === 'late' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                                      todayStatus === 'late-justified' ? 'bg-teal-50 text-teal-700 border border-teal-200' :
+                                      todayStatus === 'excused' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                                      'bg-rose-50 text-rose-700 border border-rose-200'
                                     }`}>
-                                      Today: {todayStatus === 'on-time' ? 'On Time' :
-                                               todayStatus === 'late' ? 'Late' :
-                                               todayStatus === 'late-justified' ? 'Late (J)' :
-                                               todayStatus === 'excused' ? 'Excused' :
-                                               'Missing'}
+                                      {todayStatus === 'on-time' ? 'On Time' :
+                                       todayStatus === 'late' ? 'Late' :
+                                       todayStatus === 'late-justified' ? 'Late (J)' :
+                                       todayStatus === 'excused' ? 'Excused' :
+                                       'Missing'}
                                     </span>
                                   ) : (
-                                    <span className="text-gray-400 px-2 py-1 rounded bg-gray-100">
-                                      Today: Not Marked
+                                    <span className="text-slate-400 px-2 py-0.5 rounded bg-slate-100 font-medium">
+                                      Not Marked
                                     </span>
                                   )}
                                 </div>
@@ -1994,32 +2063,32 @@ export default function CoachDashboard() {
                     </div>
 
                     {attendanceStats[squad.id] && (
-                      <div className="border-t pt-3">
-                        <p className="text-sm font-semibold text-gray-700 mb-2">This Week's Attendance:</p>
-                        <div className="grid grid-cols-3 gap-3 max-w-xl">
-                          <div className="flex flex-col items-center justify-center border border-green-200 rounded-lg bg-green-50 px-3 py-2">
-                            <span className="text-[11px] font-medium text-green-700 tracking-wide">On Time</span>
-                            <span className="text-xl font-bold text-green-600 leading-snug">{attendanceStats[squad.id].onTime}</span>
+                      <div className="border-t border-slate-200 pt-3">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">This Week&apos;s Attendance</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="flex flex-col items-center justify-center border border-emerald-200/80 rounded-lg bg-emerald-50/60 p-1.5">
+                            <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">On Time</span>
+                            <span className="text-base font-extrabold text-emerald-800 leading-snug">{attendanceStats[squad.id].onTime}</span>
                           </div>
-                          <div className="flex flex-col items-center justify-center border border-green-300 rounded-lg bg-green-100 px-3 py-2">
-                            <span className="text-[11px] font-medium text-green-700 tracking-wide">Late (J)</span>
-                            <span className="text-xl font-bold text-green-600 leading-snug">{attendanceStats[squad.id].lateJustified}</span>
+                          <div className="flex flex-col items-center justify-center border border-teal-200/80 rounded-lg bg-teal-50/60 p-1.5">
+                            <span className="text-[10px] font-bold text-teal-700 uppercase tracking-wider">Late (J)</span>
+                            <span className="text-base font-extrabold text-teal-800 leading-snug">{attendanceStats[squad.id].lateJustified}</span>
                           </div>
-                          <div className="flex flex-col items-center justify-center border border-yellow-300 rounded-lg bg-yellow-50 px-3 py-2">
-                            <span className="text-[11px] font-medium text-yellow-700 tracking-wide">Late</span>
-                            <span className="text-xl font-bold text-yellow-600 leading-snug">{attendanceStats[squad.id].late}</span>
+                          <div className="flex flex-col items-center justify-center border border-amber-200/80 rounded-lg bg-amber-50/60 p-1.5">
+                            <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">Late</span>
+                            <span className="text-base font-extrabold text-amber-800 leading-snug">{attendanceStats[squad.id].late}</span>
                           </div>
-                          <div className="flex flex-col items-center justify-center border border-blue-300 rounded-lg bg-blue-50 px-3 py-2">
-                            <span className="text-[11px] font-medium text-blue-700 tracking-wide">Excused</span>
-                            <span className="text-xl font-bold text-blue-600 leading-snug">{attendanceStats[squad.id].excused}</span>
+                          <div className="flex flex-col items-center justify-center border border-blue-200/80 rounded-lg bg-blue-50/60 p-1.5">
+                            <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">Excused</span>
+                            <span className="text-base font-extrabold text-blue-800 leading-snug">{attendanceStats[squad.id].excused}</span>
                           </div>
-                          <div className="flex flex-col items-center justify-center border border-red-300 rounded-lg bg-red-50 px-3 py-2">
-                            <span className="text-[11px] font-medium text-red-700 tracking-wide">Missing</span>
-                            <span className="text-xl font-bold text-red-600 leading-snug">{attendanceStats[squad.id].missing}</span>
+                          <div className="flex flex-col items-center justify-center border border-rose-200/80 rounded-lg bg-rose-50/60 p-1.5">
+                            <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider">Missing</span>
+                            <span className="text-base font-extrabold text-rose-800 leading-snug">{attendanceStats[squad.id].missing}</span>
                           </div>
-                          <div className="flex flex-col items-center justify-center border border-gray-300 rounded-lg bg-gray-100 px-3 py-2">
-                            <span className="text-[11px] font-medium text-gray-600 tracking-wide">Not Marked</span>
-                            <span className="text-xl font-bold text-gray-700 leading-snug">{attendanceStats[squad.id].notMarked}</span>
+                          <div className="flex flex-col items-center justify-center border border-slate-200 rounded-lg bg-slate-100/70 p-1.5">
+                            <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Not Marked</span>
+                            <span className="text-base font-extrabold text-slate-700 leading-snug">{attendanceStats[squad.id].notMarked}</span>
                           </div>
                         </div>
                       </div>
@@ -3144,7 +3213,7 @@ export default function CoachDashboard() {
             </div>
           </div>
         )}
-      </div>
+      </main>
       
       {/* Athlete Quarter Stats Modal */}
       {showAthleteStatsModal && selectedAthleteStats && (
