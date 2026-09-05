@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     // Get the authorization header
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-      console.log('Missing authorization header');
+      console.log('Unauthorized request');
       return NextResponse.json({ error: 'Missing authorization' }, { status: 401 });
     }
 
@@ -20,11 +20,11 @@ export async function GET(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     
     if (authError || !user) {
-      console.log('Invalid token or user:', authError);
+      console.log('Authentication verification failed');
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
-    console.log('User authenticated:', user.email, user.user_metadata);
+    console.log('User authenticated:', user.email);
 
     // Check if user is a coach (only coaches can access all users)
     if (user.user_metadata?.role !== 'coach') {

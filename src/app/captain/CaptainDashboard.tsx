@@ -316,13 +316,11 @@ export default function CaptainDashboard() {
         const accessToken = sessionData.session?.access_token;
         
         if (!accessToken) {
-          console.error('No access token available');
+          console.error('Authentication session unavailable');
           setAthletes([]);
           setLoading(false);
           return;
         }
-        
-        console.log('Access token available, length:', accessToken.length);
         
         // Call the API endpoint
         console.log('Calling API endpoint...');
@@ -645,15 +643,24 @@ export default function CaptainDashboard() {
         if (currentQuarter) {
           setSelectedQuarter(currentQuarter.id);
         } else if (allQuarters && allQuarters.length > 0) {
-          // Fall back to the most recently started quarter before today,
-          // or the first upcoming quarter if none have started yet
-          const mostRecentlyStarted = allQuarters
-            .filter((q: any) => new Date(q.start_date + 'T00:00:00') <= today)
+          // If between quarters, prioritize the next upcoming quarter (e.g. Fall starting soon)
+          const upcomingQuarters = allQuarters
+            .filter((q: any) => new Date(q.start_date + 'T00:00:00') > today)
             .sort((a: any, b: any) =>
-              new Date(b.start_date + 'T00:00:00').getTime() - new Date(a.start_date + 'T00:00:00').getTime()
-            )[0];
-          const fallback = mostRecentlyStarted || allQuarters[0];
-          setSelectedQuarter(fallback.id);
+              new Date(a.start_date + 'T00:00:00').getTime() - new Date(b.start_date + 'T00:00:00').getTime()
+            );
+
+          if (upcomingQuarters.length > 0) {
+            setSelectedQuarter(upcomingQuarters[0].id);
+          } else {
+            const mostRecentlyStarted = allQuarters
+              .filter((q: any) => new Date(q.start_date + 'T00:00:00') <= today)
+              .sort((a: any, b: any) =>
+                new Date(b.start_date + 'T00:00:00').getTime() - new Date(a.start_date + 'T00:00:00').getTime()
+              )[0];
+            const fallback = mostRecentlyStarted || allQuarters[0];
+            setSelectedQuarter(fallback.id);
+          }
         }
       }
     } catch (error) {
@@ -850,19 +857,6 @@ export default function CaptainDashboard() {
       percentage: scoped.percentage,
     });
   }, [finalQuarterReport, sessionType]);
-
-  const isDateWithinAnyQuarter = (date: Date) => {
-    if (!quarters.length) return true;
-
-    const checkDate = new Date(date);
-    checkDate.setHours(12, 0, 0, 0);
-
-    return quarters.some((q: any) => {
-      const start = new Date(q.start_date + 'T00:00:00');
-      const end = new Date(q.end_date + 'T23:59:59');
-      return checkDate >= start && checkDate <= end;
-    });
-  };
 
   // Check if there's practice for a squad on a given date
   const hasPractice = (date: Date) => {
@@ -1145,90 +1139,161 @@ export default function CaptainDashboard() {
     setCalendarYear(today.getFullYear());
   };
 
-  if (loading) return <p className="p-4">Loading...</p>;
-  if (user === undefined) return <p className="p-4">Loading...</p>;
+  if (loading || user === undefined) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-3 border-[#182B49] border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs font-semibold tracking-wider text-slate-500 uppercase">Loading Dashboard...</p>
+        </div>
+      </div>
+    );
+  }
   if (!user) return null;
 
+  const captainName = user.user_metadata?.firstName 
+    ? `${user.user_metadata.firstName} ${user.user_metadata.lastName}`
+    : user.user_metadata?.username || user.email?.split("@")[0];
+
+  const squadDisplay = `${user.user_metadata?.gender === 'male' ? "Men's" : user.user_metadata?.gender === 'female' ? "Women's" : user.user_metadata?.gender || ''} ${user.user_metadata?.weapon ? user.user_metadata.weapon.charAt(0).toUpperCase() + user.user_metadata.weapon.slice(1) : ''}`.trim();
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-900 to-blue-800 p-4 sm:p-6">
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
       {showPasswordChange && user && (
         <PasswordChangeModal
           username={user.user_metadata?.username || user.email?.split('@')[0] || ''}
           onPasswordChanged={() => {
             setShowPasswordChange(false);
-            // Refresh user data
             supabase.auth.getSession().then(({ data }) => {
               if (data.session?.user) setUser(data.session.user);
             });
           }}
         />
       )}
-      
-      <div className="max-w-screen-lg mx-auto">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-4">
-          <div>
-            <h1 className="text-xl sm:text-3xl font-extrabold text-yellow-300 mb-1 sm:mb-2">Welcome, Captain {user.user_metadata.firstName ?? user.email}</h1>
-            <p className="text-yellow-100 text-sm sm:text-lg font-medium">
-              Squad: {user.user_metadata?.gender === 'male' ? "Men's" : user.user_metadata?.gender === 'female' ? "Women's" : user.user_metadata?.gender} {user.user_metadata?.weapon?.charAt(0).toUpperCase() + user.user_metadata?.weapon?.slice(1)}
-            </p>
-          </div>
-            <div className="flex flex-wrap gap-2 sm:gap-4 items-center w-full sm:w-auto">
-            <div className="flex bg-white/10 rounded-lg overflow-hidden border border-white/20 backdrop-blur-sm">
-              <button
-                onClick={() => setSessionType('practice')}
-                className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium transition ${sessionType === 'practice' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
-              >Practice</button>
-              <button
-                onClick={() => setSessionType('lift')}
-                className={`px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium transition ${sessionType === 'lift' ? 'bg-yellow-400 text-blue-900' : 'text-white hover:bg-white/20'}`}
-              >Lift</button>
+
+      {/* Collegiate Top Navigation Bar */}
+      <header className="bg-[#182B49] text-white border-b border-slate-800 sticky top-0 z-30 shadow-xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3 sm:gap-4">
+          {/* Brand / Logo */}
+          <div className="flex items-center gap-3">
+            <img src="/fencing-logo.png" alt="UCSD Fencing" className="w-10 h-10 object-contain shrink-0" />
+            <div>
+              <span className="text-[10px] font-bold tracking-widest text-[#FFCD00] uppercase block leading-none">
+                UC San Diego
+              </span>
+              <span className="text-base font-extrabold tracking-tight text-white leading-tight">
+                TRITONS FENCING
+              </span>
             </div>
+            <span className="hidden md:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/10 text-slate-200 border border-white/10 ml-2">
+              Captain Portal
+            </span>
+          </div>
+
+          {/* Session Switcher (Practice vs Lift) */}
+          <div className="flex items-center bg-slate-900/60 p-1 rounded-xl border border-white/10">
+            <button
+              onClick={() => setSessionType('practice')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                sessionType === 'practice'
+                  ? 'bg-white text-[#182B49] shadow-xs'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              Practice
+            </button>
+            <button
+              onClick={() => setSessionType('lift')}
+              className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                sessionType === 'lift'
+                  ? 'bg-white text-[#182B49] shadow-xs'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              Lift
+            </button>
+          </div>
+
+          {/* Action Buttons: Mode Switcher & Logout */}
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={() => setViewMode(viewMode === 'mark' ? 'view' : 'mark')}
-              className="px-3 sm:px-5 py-1.5 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-md transition-transform transform hover:scale-105 text-xs sm:text-base"
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer border ${
+                viewMode === 'mark'
+                  ? 'bg-[#FFCD00] text-[#182B49] border-[#FFCD00] hover:bg-[#e6b800]'
+                  : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+              }`}
             >
               {viewMode === 'mark' ? 'My Attendance' : 'Mark Attendance'}
             </button>
             <button
               onClick={handleLogout}
-              className="px-3 sm:px-4 py-1.5 sm:py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-md transition-transform transform hover:scale-105 text-xs sm:text-base"
+              className="px-3 py-1.5 rounded-lg border border-white/20 text-xs font-semibold text-slate-200 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             >
-              Logout
+              Sign Out
             </button>
           </div>
         </div>
+      </header>
 
+      {/* Main Content Container */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8 space-y-6">
+        
+        {/* Welcome & Profile Header Banner */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-900">
+                Welcome, Captain {captainName}
+              </h1>
+              {squadDisplay && (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-[#182B49] border border-slate-200">
+                  {squadDisplay} Captain
+                </span>
+              )}
+            </div>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              {viewMode === 'mark' 
+                ? `Marking ${sessionType === 'practice' ? 'Practice' : 'Lift'} attendance for your squad.`
+                : `Viewing your personal ${sessionType === 'practice' ? 'Practice' : 'Lift'} attendance records.`}
+            </p>
+          </div>
+        </div>
+
+        {/* ------------------------------------------------------------- */}
+        {/* VIEW MODE: MARK ATTENDANCE                                     */}
+        {/* ------------------------------------------------------------- */}
         {viewMode === 'mark' && (
-          <div className="border rounded-lg p-3 sm:p-6 bg-white shadow-lg">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-6 space-y-6">
             {message && (
-              <div className={`mb-3 sm:mb-4 p-3 sm:p-4 rounded-lg text-center font-semibold text-xs sm:text-base ${
+              <div className={`p-3.5 rounded-xl text-center font-semibold text-xs sm:text-sm border ${
                 message.startsWith('Error') 
-                  ? 'bg-red-100 text-red-700 border border-red-300' 
-                  : 'bg-green-100 text-green-700 border border-green-300'
+                  ? 'bg-red-50 text-red-700 border-red-200' 
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
               }`}>
                 {message}
               </div>
             )}
 
-            {/* Gender Tab Selection */}
-            <div className="flex justify-center mb-4 sm:mb-6">
-              <div className="inline-flex bg-gray-100 rounded-lg p-1 shadow-sm border border-gray-200">
+            {/* Squad Gender Selector */}
+            <div className="flex justify-center">
+              <div className="inline-flex bg-slate-100 rounded-xl p-1 border border-slate-200 shadow-xs">
                 <button
                   onClick={() => setSelectedGender('men')}
-                  className={`px-4 sm:px-8 py-2 rounded-md font-semibold text-xs sm:text-sm transition-all duration-200 ${
+                  className={`px-4 sm:px-8 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all cursor-pointer ${
                     selectedGender === 'men'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'text-gray-600 hover:text-gray-900'
+                      ? 'bg-white text-[#182B49] shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   Men's {user.user_metadata?.weapon?.charAt(0).toUpperCase() + user.user_metadata?.weapon?.slice(1)}
                 </button>
                 <button
                   onClick={() => setSelectedGender('women')}
-                  className={`px-4 sm:px-8 py-2 rounded-md font-semibold text-xs sm:text-sm transition-all duration-200 ${
+                  className={`px-4 sm:px-8 py-2 rounded-lg font-bold text-xs sm:text-sm transition-all cursor-pointer ${
                     selectedGender === 'women'
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'text-gray-600 hover:text-gray-900'
+                      ? 'bg-white text-[#182B49] shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   Women's {user.user_metadata?.weapon?.charAt(0).toUpperCase() + user.user_metadata?.weapon?.slice(1)}
@@ -1236,76 +1301,75 @@ export default function CaptainDashboard() {
               </div>
             </div>
 
-            {/* Week navigation for marking mode only (calendar view has its own header) */}
-            <div className="bg-gradient-to-r from-blue-700 to-blue-800 px-3 sm:px-6 py-3 sm:py-4 rounded-t-lg -mx-3 sm:-mx-6 -mt-3 sm:-mt-6 mb-3 sm:mb-4 shadow-md">
-              <div className="flex items-center justify-between">
+            {/* Week navigation bar */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 sm:px-6 py-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-1 sm:gap-2">
                 <button
                   onClick={goToPreviousWeek}
-                  className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm text-xs sm:text-sm"
+                  className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors flex items-center gap-1 cursor-pointer"
                 >
-                  <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                   </svg>
                   <span className="hidden sm:inline">Previous</span>
                 </button>
-                
-                <div className="text-center flex-1">
-                  <h2 className="text-sm sm:text-xl font-bold text-white">
-                    {currentWeekOffset === 0 ? "This Week's" : 
-                      currentWeekOffset === -1 ? "Last Week's" :
-                      currentWeekOffset === 1 ? "Next Week's" :
-                      currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
-                      `${currentWeekOffset} Weeks Ahead`} {sessionType === 'practice' ? 'Practice' : 'Lift'} Attendance
-                  </h2>
-                  <p className="text-blue-100 text-xs sm:text-sm font-medium">
-                    {formatWeekRange(weekDates)}
-                  </p>
-                </div>
-                
-                <div className="flex gap-1 sm:gap-2">
-                  {currentWeekOffset !== 0 && (
-                    <button
-                      onClick={goToCurrentWeek}
-                      className="px-2 sm:px-3 py-1.5 sm:py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 text-xs sm:text-sm backdrop-blur-sm"
-                    >
-                      Today
-                    </button>
-                  )}
+
+                {currentWeekOffset !== 0 && (
                   <button
-                    onClick={goToNextWeek}
-                    className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm text-xs sm:text-sm"
+                    onClick={goToCurrentWeek}
+                    className="px-2.5 py-1.5 bg-[#182B49] text-white rounded-lg text-xs font-bold hover:bg-[#1f375d] transition-colors cursor-pointer"
                   >
-                    <span className="hidden sm:inline">Next</span>
-                    <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
+                    This Week
                   </button>
-                </div>
+                )}
               </div>
+
+              <div className="text-center flex-1">
+                <h2 className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-wider">
+                  {currentWeekOffset === 0 ? "This Week's" : 
+                    currentWeekOffset === -1 ? "Last Week's" :
+                    currentWeekOffset === 1 ? "Next Week's" :
+                    currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
+                    `${currentWeekOffset} Weeks Ahead`} {sessionType === 'practice' ? 'Practice' : 'Lift'} Attendance
+                </h2>
+                <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                  {formatWeekRange(weekDates)}
+                </p>
+              </div>
+
+              <button
+                onClick={goToNextWeek}
+                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <span className="hidden sm:inline">Next</span>
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
             </div>
 
             {athletes.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">
-                <p>No athletes found. Make sure you have created athlete accounts.</p>
-                <p className="text-sm mt-2">Run: <code>node scripts/createUsers.js</code></p>
+              <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
+                <p className="font-semibold text-sm">No athletes found in squad roster.</p>
+                <p className="text-xs mt-1 text-slate-400">Make sure athlete accounts have been properly seeded.</p>
               </div>
             ) : (
-              <div className="space-y-6">
+              <div className="space-y-4 sm:space-y-5">
                 {dayNames.map((dayName, dayIndex) => {
                   const currentDate = weekDates[dayIndex];
                   const hasScheduledPractice = hasPractice(currentDate);
 
                   if (!hasScheduledPractice) {
                     return (
-                      <div key={dayName} className="border rounded-lg p-3 sm:p-4 bg-gray-50">
-                        <h3 className="font-bold text-sm sm:text-lg text-gray-600">
-                          <span className="hidden sm:inline">{dayName} ({formatDate(currentDate)}) - No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
-                          <span className="sm:hidden">{dayName.substring(0, 3)} {formatDate(currentDate)} - No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
-                        </h3>
-                        <p className="text-xs sm:text-sm text-gray-500 mt-1">
-                          <span className="hidden sm:inline">Practice not scheduled for this day</span>
-                          <span className="sm:hidden">Not scheduled</span>
-                        </p>
+                      <div key={dayName} className="border border-slate-200 rounded-xl p-3 sm:p-4 bg-slate-50/70">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-bold text-xs sm:text-sm text-slate-500">
+                            {dayName} ({formatDate(currentDate)})
+                          </h3>
+                          <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                            No {sessionType === 'practice' ? 'Practice' : 'Lift'} Scheduled
+                          </span>
+                        </div>
                       </div>
                     );
                   }
@@ -1316,15 +1380,20 @@ export default function CaptainDashboard() {
                   );
 
                   return (
-                    <div key={dayName} className="border rounded-lg p-2 sm:p-4 shadow-sm">
-                      <div className="flex items-center justify-between mb-2">
-                        <h3 className="font-bold text-xs sm:text-base text-gray-900">
-                          <span className="hidden sm:inline">{dayName} ({formatDate(currentDate)})</span>
-                          <span className="sm:hidden">{dayName.substring(0, 3)} {formatDate(currentDate)}</span>
-                        </h3>
+                    <div key={dayName} className="border border-slate-200 rounded-xl p-3 sm:p-5 bg-white shadow-xs">
+                      {/* Day Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-3 mb-3 border-b border-slate-100 gap-2">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
+                            {dayName}, {formatDate(currentDate)}
+                          </h3>
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 uppercase tracking-wider">
+                            {sessionType === 'practice' ? 'Practice Day' : 'Lift Day'}
+                          </span>
+                        </div>
                         
                         {/* Per-day bulk actions */}
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <button
                             onClick={() => {
                               const dateKey = getLocalDateString(currentDate);
@@ -1335,7 +1404,7 @@ export default function CaptainDashboard() {
                                 selectAllAthletes(currentDate);
                               }
                             }}
-                            className="px-2 sm:px-3 py-0.5 sm:py-1 text-[10px] sm:text-xs font-semibold bg-gray-700 hover:bg-gray-800 text-white rounded shadow-md transition-all duration-200"
+                            className="px-2.5 py-1 text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition-colors cursor-pointer"
                           >
                             {(() => {
                               const dateKey = getLocalDateString(currentDate);
@@ -1349,31 +1418,41 @@ export default function CaptainDashboard() {
                             const selectedForDate = selectedAthletes[dateKey] || new Set();
                             if (selectedForDate.size > 0) {
                               return (
-                                <>
-                                  <span className="text-[10px] sm:text-xs text-gray-800 font-semibold bg-blue-100 px-1.5 py-0.5 rounded">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-700 font-bold bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
                                     {selectedForDate.size} selected
                                   </span>
                                   <div className="flex gap-1">
-                                    {['on-time', 'late', 'excused', 'missing'].map((status) => (
-                                      <button
-                                        key={status}
-                                        onClick={() => markBulkAttendance(currentDate, status)}
-                                        className={`px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-medium ${
-                                          status === 'on-time' ? 'bg-green-500 hover:bg-green-600 text-white' :
-                                          status === 'late' ? 'bg-yellow-500 hover:bg-yellow-600 text-white' :
-                                          status === 'excused' ? 'bg-blue-500 hover:bg-blue-600 text-white' :
-                                          'bg-red-500 hover:bg-red-600 text-white'
-                                        }`}
-                                        title={`Mark all as ${status}`}
-                                      >
-                                        {status === 'on-time' ? '✓' :
-                                         status === 'late' ? '⏱' :
-                                         status === 'excused' ? 'E' :
-                                         '✗'}
-                                      </button>
-                                    ))}
+                                    <button
+                                      onClick={() => markBulkAttendance(currentDate, 'on-time')}
+                                      className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                                      title="Mark all selected as On Time"
+                                    >
+                                      On Time
+                                    </button>
+                                    <button
+                                      onClick={() => markBulkAttendance(currentDate, 'late')}
+                                      className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-white cursor-pointer"
+                                      title="Mark all selected as Late"
+                                    >
+                                      Late
+                                    </button>
+                                    <button
+                                      onClick={() => markBulkAttendance(currentDate, 'excused')}
+                                      className="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                                      title="Mark all selected as Excused"
+                                    >
+                                      Excused
+                                    </button>
+                                    <button
+                                      onClick={() => markBulkAttendance(currentDate, 'missing')}
+                                      className="px-2 py-0.5 rounded text-[11px] font-bold bg-red-600 hover:bg-red-700 text-white cursor-pointer"
+                                      title="Mark all selected as Missing"
+                                    >
+                                      Missing
+                                    </button>
                                   </div>
-                                </>
+                                </div>
                               );
                             }
                             return null;
@@ -1381,15 +1460,17 @@ export default function CaptainDashboard() {
                         </div>
                       </div>
 
-                      <div className="grid gap-3 sm:gap-4">
+                      {/* Athlete Roster Rows */}
+                      <div className="space-y-2">
                         {filteredAthletes.map((athlete) => {
                           const currentStatus = getAttendanceStatus(athlete.id, currentDate);
                           const markingKey = `${athlete.id}-${getLocalDateString(currentDate)}`;
                           const isMarking = markingAttendance[markingKey];
+                          const notes = getAttendanceNotes(athlete.id, currentDate);
 
                           return (
-                            <div key={athlete.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-2 sm:p-3 bg-gray-50 rounded-lg shadow-sm gap-1.5 sm:gap-2 border border-gray-100">
-                              <div className="flex items-start gap-1.5 sm:gap-2 flex-1 w-full sm:w-auto">
+                            <div key={athlete.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-2.5 sm:p-3 bg-slate-50/70 hover:bg-slate-50 rounded-xl gap-2 border border-slate-200/80 transition-colors">
+                              <div className="flex items-start gap-2.5 flex-1 w-full sm:w-auto">
                                 <input
                                   type="checkbox"
                                   checked={(() => {
@@ -1398,76 +1479,105 @@ export default function CaptainDashboard() {
                                     return selectedForDate.has(athlete.id);
                                   })()}
                                   onChange={() => toggleAthleteSelection(athlete.id, currentDate)}
-                                  className="mt-0.5 w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 rounded focus:ring-blue-500"
+                                  className="mt-0.5 w-4 h-4 text-[#182B49] rounded border-slate-300 focus:ring-[#182B49] cursor-pointer"
                                 />
                                 <div className="flex-1">
-                                  <span className="font-semibold text-gray-900 text-xs sm:text-sm">
-                                    {athlete.full_name || `${athlete.first_name} ${athlete.last_name}`.trim() || athlete.username}
-                                    {athlete.role === 'captain' && <span className="ml-1 text-[10px] sm:text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-semibold">Capt 🔱</span>}
-                                  </span>
-                                  {currentStatus && (() => {
-                                    const notes = getAttendanceNotes(athlete.id, currentDate);
-                                    return (
-                                      <div className="text-[10px] sm:text-xs text-gray-600 mt-0.5 flex items-center gap-1">
-                                        <span>
-                                          Current: <span className={`font-medium ${
-                                            currentStatus === 'on-time' || currentStatus === 'late-justified' ? 'text-green-600' :
-                                            currentStatus === 'late' ? 'text-yellow-600' :
-                                            currentStatus === 'excused' ? 'text-blue-600' :
-                                            'text-red-600'
-                                          }`}>
-                                            {currentStatus === 'on-time' ? 'On Time' :
-                                             currentStatus === 'late' ? 'Late' :
-                                             currentStatus === 'late-justified' ? 'Late (Justified)' :
-                                             currentStatus === 'excused' ? 'Excused' :
-                                             'Missing'}
-                                          </span>
-                                        </span>
-                                        {notes && (
-                                          <div className="relative group">
-                                            <span className="inline-flex items-center text-blue-600">
-                                              📝
-                                            </span>
-                                            <div className="hidden group-hover:block absolute z-50 bg-gray-900 text-white text-xs rounded px-2 py-1 -translate-y-full -mt-1 left-0 whitespace-normal max-w-xs shadow-lg">
-                                              {notes}
-                                              <div className="absolute top-full left-2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-bold text-slate-900 text-xs sm:text-sm">
+                                      {athlete.full_name || `${athlete.first_name} ${athlete.last_name}`.trim() || athlete.username}
+                                    </span>
+                                    {athlete.role === 'captain' && (
+                                      <span className="text-[10px] bg-slate-200 text-[#182B49] px-1.5 py-0.2 rounded font-bold uppercase tracking-wider">
+                                        Captain
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                                    <span>
+                                      Status: <span className={`font-semibold ${
+                                        currentStatus === 'on-time' || currentStatus === 'late-justified' ? 'text-emerald-700' :
+                                        currentStatus === 'late' ? 'text-amber-700' :
+                                        currentStatus === 'excused' ? 'text-blue-700' :
+                                        currentStatus === 'missing' ? 'text-red-700' :
+                                        'text-slate-400'
+                                      }`}>
+                                        {currentStatus === 'on-time' ? 'On Time' :
+                                         currentStatus === 'late' ? 'Late' :
+                                         currentStatus === 'late-justified' ? 'Late (Justified)' :
+                                         currentStatus === 'excused' ? 'Excused' :
+                                         currentStatus === 'missing' ? 'Missing' :
+                                         'Not Marked'}
+                                      </span>
+                                    </span>
+                                    {notes && (
+                                      <span className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded" title={notes}>
+                                        Note: {notes}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                               
-                              <div className="flex flex-wrap gap-1 sm:gap-2 w-full sm:w-auto items-center">
+                              {/* Action Buttons */}
+                              <div className="flex flex-wrap gap-1.5 w-full sm:w-auto items-center">
                                 {isMarking && (
-                                  <div className="text-[10px] sm:text-xs text-gray-500 w-full sm:w-auto sm:mr-1">Updating...</div>
+                                  <span className="text-xs text-slate-500 font-medium mr-1">Saving...</span>
                                 )}
-                                {['on-time', 'late-justified', 'late', 'excused', 'missing'].map((status) => (
-                                  <button
-                                    key={status}
-                                    onClick={() => markAttendance(athlete.id, currentDate, status)}
-                                    disabled={isMarking}
-                                    className={`px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded text-[10px] sm:text-xs font-semibold transition-all duration-200 ${
-                                      currentStatus === status 
-                                        ? 'ring-2 ring-blue-400 shadow-lg' 
-                                        : ''
-                                    } ${
-                                      status === 'on-time' ? 'bg-green-500 hover:bg-green-600 text-white' :
-                                      status === 'late' ? 'bg-yellow-500 hover:bg-yellow-600 text-white' :
-                                      status === 'late-justified' ? 'bg-green-600 hover:bg-green-700 text-white' :
-                                      status === 'excused' ? 'bg-blue-500 hover:bg-blue-600 text-white' :
-                                      'bg-red-500 hover:bg-red-600 text-white'
-                                    }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
-                                  >
-                                    {status === 'on-time' ? 'On Time' :
-                                     status === 'late' ? 'Late' :
-                                     status === 'late-justified' ? 'Late (J)' :
-                                     status === 'excused' ? 'Excused' :
-                                     'Missing'}
-                                  </button>
-                                ))}
+                                <button
+                                  onClick={() => markAttendance(athlete.id, currentDate, 'on-time')}
+                                  disabled={isMarking}
+                                  className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                    currentStatus === 'on-time'
+                                      ? 'bg-emerald-600 text-white ring-2 ring-emerald-400 shadow-xs'
+                                      : 'bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300'
+                                  }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                  On Time
+                                </button>
+                                <button
+                                  onClick={() => markAttendance(athlete.id, currentDate, 'late-justified')}
+                                  disabled={isMarking}
+                                  className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                    currentStatus === 'late-justified'
+                                      ? 'bg-lime-600 text-white ring-2 ring-lime-400 shadow-xs'
+                                      : 'bg-white hover:bg-lime-50 text-lime-700 border border-lime-300'
+                                  }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                  Late (J)
+                                </button>
+                                <button
+                                  onClick={() => markAttendance(athlete.id, currentDate, 'late')}
+                                  disabled={isMarking}
+                                  className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                    currentStatus === 'late'
+                                      ? 'bg-amber-500 text-white ring-2 ring-amber-300 shadow-xs'
+                                      : 'bg-white hover:bg-amber-50 text-amber-700 border border-amber-300'
+                                  }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                  Late
+                                </button>
+                                <button
+                                  onClick={() => markAttendance(athlete.id, currentDate, 'excused')}
+                                  disabled={isMarking}
+                                  className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                    currentStatus === 'excused'
+                                      ? 'bg-blue-600 text-white ring-2 ring-blue-400 shadow-xs'
+                                      : 'bg-white hover:bg-blue-50 text-blue-700 border border-blue-300'
+                                  }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                  Excused
+                                </button>
+                                <button
+                                  onClick={() => markAttendance(athlete.id, currentDate, 'missing')}
+                                  disabled={isMarking}
+                                  className={`px-2 sm:px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                    currentStatus === 'missing'
+                                      ? 'bg-red-600 text-white ring-2 ring-red-400 shadow-xs'
+                                      : 'bg-white hover:bg-red-50 text-red-700 border border-red-300'
+                                  }${isMarking ? ' opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                  Missing
+                                </button>
                                 <button
                                   onClick={() => openNotesModal(
                                     athlete.id,
@@ -1476,13 +1586,13 @@ export default function CaptainDashboard() {
                                     currentStatus || 'on-time'
                                   )}
                                   disabled={isMarking}
-                                  className="px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded text-[10px] sm:text-xs font-semibold bg-gray-200 hover:bg-gray-300 text-gray-800 transition-all duration-200 flex items-center gap-0.5 sm:gap-1 shadow-sm"
+                                  className="px-2 py-1 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition-colors cursor-pointer flex items-center gap-1"
                                   title="Add note"
                                 >
                                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                   </svg>
-                                  <span className="hidden sm:inline">Note</span>
+                                  Note
                                 </button>
                               </div>
                             </div>
@@ -1497,283 +1607,174 @@ export default function CaptainDashboard() {
           </div>
         )}
 
+        {/* ------------------------------------------------------------- */}
+        {/* VIEW MODE: MY ATTENDANCE (Personal Athlete View)               */}
+        {/* ------------------------------------------------------------- */}
         {viewMode === 'view' && (
-          // Modern personal attendance calendar (matches AthleteDashboard)
-          <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl border border-white/20 overflow-hidden">
-              {/* Calendar Header */}
-              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-3 sm:px-6 py-3 sm:py-4">
-                <div className="flex items-center justify-between mb-2">
+          <div className="space-y-6">
+            {/* Weekly Attendance Strip Card */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              {/* Calendar Strip Header */}
+              <div className="bg-slate-50 border-b border-slate-200 px-4 sm:px-6 py-3.5 flex items-center justify-between">
+                <div className="flex items-center gap-1 sm:gap-2">
                   <button
                     onClick={goToPreviousWeek}
-                    className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm text-xs sm:text-sm"
+                    className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors flex items-center gap-1 cursor-pointer"
                   >
-                    <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                     </svg>
                     <span className="hidden sm:inline">Previous</span>
                   </button>
-                  
-                  <div className="text-center flex-1">
-                    <h2 className="text-sm sm:text-xl font-bold text-white">
-                      {currentWeekOffset === 0 ? "This Week's" : 
-                       currentWeekOffset === -1 ? "Last Week's" :
-                       currentWeekOffset === 1 ? "Next Week's" :
-                       currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
-                       `${currentWeekOffset} Weeks Ahead`} {sessionType === 'practice' ? 'Practice' : 'Lift'}
-                    </h2>
-                    <p className="text-blue-100 text-xs sm:text-sm font-medium">
-                      {formatWeekRange(weekDates)}
-                    </p>
-                  </div>
-                  
-                  <div className="flex gap-1 sm:gap-2">
-                    {currentWeekOffset !== 0 && (
-                      <button
-                        onClick={goToCurrentWeek}
-                        className="px-2 sm:px-3 py-1.5 sm:py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 text-xs sm:text-sm backdrop-blur-sm"
-                      >
-                        Today
-                      </button>
-                    )}
+
+                  {currentWeekOffset !== 0 && (
                     <button
-                      onClick={goToNextWeek}
-                      className="flex items-center gap-1 sm:gap-2 px-2 sm:px-4 py-1.5 sm:py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-all duration-200 backdrop-blur-sm text-xs sm:text-sm"
+                      onClick={goToCurrentWeek}
+                      className="px-2.5 py-1.5 bg-[#182B49] text-white rounded-lg text-xs font-bold hover:bg-[#1f375d] transition-colors cursor-pointer"
                     >
-                      <span className="hidden sm:inline">Next</span>
-                      <svg className="w-3 h-3 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
+                      This Week
                     </button>
-                  </div>
+                  )}
                 </div>
+
+                <div className="text-center">
+                  <h2 className="text-xs sm:text-sm font-bold text-slate-900 uppercase tracking-wider">
+                    {currentWeekOffset === 0 ? "Current Week" : 
+                     currentWeekOffset === -1 ? "Last Week" :
+                     currentWeekOffset === 1 ? "Next Week" :
+                     currentWeekOffset < 0 ? `${Math.abs(currentWeekOffset)} Weeks Ago` :
+                     `${currentWeekOffset} Weeks Ahead`}
+                  </h2>
+                  <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                    {formatWeekRange(weekDates)}
+                  </p>
+                </div>
+
+                <button
+                  onClick={goToNextWeek}
+                  className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <span className="hidden sm:inline">Next</span>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
               </div>
 
-              {/* Calendar Grid */}
-              <div className="p-3 sm:p-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-3 sm:gap-4">
+              {/* 7-Day Attendance Grid */}
+              <div className="p-4 sm:p-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
                   {dayNames.map((dayName, index) => {
                     const currentDate = weekDates[index];
                     const status = getAttendanceStatus(user.id, currentDate);
                     const hasScheduledPractice = hasPractice(currentDate);
                     const isToday = currentDate.toDateString() === new Date().toDateString();
+                    const notes = getAttendanceNotes(user.id, currentDate);
 
                     return (
                       <div
                         key={dayName}
-                        className={`${!hasScheduledPractice ? 'hidden sm:block' : ''} relative p-2 sm:p-3 rounded-lg sm:rounded-xl border sm:border-2 transition-all duration-200 ${
+                        className={`rounded-xl p-3 border transition-all ${
                           isToday 
-                            ? 'border-yellow-400 bg-gradient-to-br from-yellow-50 to-yellow-100 shadow-lg' 
-                            : 'border-gray-200 bg-gradient-to-br from-gray-50 to-white hover:border-blue-300 hover:shadow-md'
+                            ? 'border-[#FFCD00] ring-2 ring-[#FFCD00]/30 bg-amber-50/30' 
+                            : 'border-slate-200 bg-white hover:border-slate-300'
                         }`}
                       >
-                        {/* Mobile compact view */}
-                        <div className="sm:hidden text-center">
-                          <div className={`text-xs font-semibold ${isToday ? 'text-yellow-700' : 'text-gray-600'}`}>
-                            {dayName.substring(0, 3)}
+                        {/* Day & Date Header */}
+                        <div className="flex items-center justify-between sm:flex-col sm:items-center sm:text-center pb-2 sm:pb-3 border-b border-slate-100 mb-2.5">
+                          <div className="flex items-center gap-2 sm:flex-col sm:gap-0">
+                            <span className={`text-xs font-bold uppercase tracking-wider ${isToday ? 'text-[#C69214]' : 'text-slate-500'}`}>
+                              {dayName.substring(0, 3)}
+                            </span>
+                            <span className={`text-lg sm:text-xl font-extrabold ${isToday ? 'text-slate-950' : 'text-slate-800'}`}>
+                              {currentDate.getDate()}
+                            </span>
                           </div>
-                          <div className={`text-lg font-bold ${isToday ? 'text-yellow-800' : 'text-gray-800'}`}>
-                            {currentDate.getDate()}
-                          </div>
-                          {/* Status with text label */}
-                          <div className="mt-1.5 flex flex-col items-center gap-0.5">
-                            {!hasScheduledPractice ? (
-                              <>
-                                <div className="w-4 h-4 rounded-full bg-gray-200 flex items-center justify-center">
-                                  <span className="text-xs text-gray-500">-</span>
-                                </div>
-                                <span className="text-[10px] text-gray-500">No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
-                              </>
-                            ) : status ? (
-                              <>
-                                <div className={`w-4 h-4 rounded-full ${
-                                  status === 'on-time' || status === 'late-justified' ? 'bg-green-500' :
-                                  status === 'late' ? 'bg-yellow-500' :
-                                  status === 'excused' ? 'bg-blue-500' :
-                                  'bg-red-500'
-                                }`}></div>
-                                <span className={`text-[10px] font-medium ${
-                                  status === 'on-time' || status === 'late-justified' ? 'text-green-700' :
-                                  status === 'late' ? 'text-yellow-700' :
-                                  status === 'excused' ? 'text-blue-700' :
-                                  'text-red-700'
-                                }`}>
-                                  {status === 'on-time' ? 'On Time' :
-                                   status === 'late' ? 'Late' :
-                                   status === 'late-justified' ? 'Late (J)' :
-                                   status === 'excused' ? 'Excused' :
-                                   'Missing'}
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                <div className="w-4 h-4 rounded-full bg-gray-300"></div>
-                                <span className="text-[10px] text-gray-500">Not Marked</span>
-                              </>
-                            )}
-                          </div>
+                          {isToday && (
+                            <span className="text-[10px] font-bold text-[#C69214] bg-[#FFCD00]/20 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                              Today
+                            </span>
+                          )}
                         </div>
 
-                        {/* Desktop full view */}
-                        <div className="hidden sm:block">
-                        {/* Day Header */}
-                        <div className="text-center mb-2 sm:mb-3">
-                          <div className={`text-xs sm:text-sm font-semibold uppercase tracking-wide ${
-                            isToday ? 'text-yellow-700' : 'text-gray-600'
-                          }`}>
-                            {dayName}
-                          </div>
-                          <div className={`text-xl sm:text-2xl font-bold ${
-                            isToday ? 'text-yellow-800' : 'text-gray-800'
-                          }`}>
-                            {currentDate.getDate()}
-                          </div>
-                          <div className={`text-xs ${
-                            isToday ? 'text-yellow-600' : 'text-gray-500'
-                          }`}>
-                            {currentDate.toLocaleDateString('en-US', { month: 'short' })}
-                          </div>
-                        </div>
-                        {/* Practice Status */}
-                        <div className="text-center">
+                        {/* Status Badge */}
+                        <div className="flex flex-col items-center justify-center pt-1 min-h-[36px]">
                           {!hasScheduledPractice ? (
-                            <div className="flex flex-col items-center gap-2">
-                              <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center">
-                                <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </div>
-                              <span className="text-xs font-medium text-gray-500">No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
-                            </div>
-                          ) : status ? (
-                            <div className="flex flex-col items-center gap-2">
-                              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                                status === 'on-time' ? 'bg-green-100 text-green-600' :
-                                status === 'late' ? 'bg-yellow-100 text-yellow-600' :
-                                status === 'late-justified' ? 'bg-green-100 text-green-600' :
-                                status === 'excused' ? 'bg-blue-100 text-blue-600' :
-                                'bg-red-100 text-red-600'
-                              }`}>
-                                {status === 'on-time' ? (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                ) : status === 'late' || status === 'late-justified' ? (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                ) : status === 'excused' ? (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                  </svg>
-                                ) : (
-                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                  </svg>
-                                )}
-                              </div>
-                              <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                                status === 'on-time' ? 'bg-green-100 text-green-700' :
-                                status === 'late' ? 'bg-yellow-100 text-yellow-700' :
-                                status === 'late-justified' ? 'bg-green-100 text-green-700' :
-                                status === 'excused' ? 'bg-blue-100 text-blue-700' :
-                                'bg-red-100 text-red-700'
-                              }`}>
-                                {status === 'on-time' ? 'On Time' :
-                                 status === 'late' ? 'Late' :
-                                 status === 'late-justified' ? 'Late (Justified)' :
-                                 status === 'excused' ? 'Excused' :
-                                 'Missing'}
-                              </span>
-                              {(() => {
-                                const notes = getAttendanceNotes(user.id, currentDate);
-                                if (notes) {
-                                  return (
-                                    <div className="mt-1 text-[10px] text-gray-600 bg-yellow-50 border border-yellow-200 rounded px-2 py-1 max-w-full break-words" title={notes}>
-                                      <span className="font-medium">📝 Note:</span> {notes.length > 50 ? notes.substring(0, 50) + '...' : notes}
-                                    </div>
-                                  );
-                                }
-                                return null;
-                              })()}
-                            </div>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                              <span>—</span>
+                              <span>No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
+                            </span>
+                          ) : status === 'on-time' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span>✓</span>
+                              <span>On Time</span>
+                            </span>
+                          ) : status === 'late-justified' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-lime-50 text-lime-700 border border-lime-200">
+                              <span>J</span>
+                              <span>Late (J)</span>
+                            </span>
+                          ) : status === 'late' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              <span>L</span>
+                              <span>Late</span>
+                            </span>
+                          ) : status === 'excused' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                              <span>E</span>
+                              <span>Excused</span>
+                            </span>
+                          ) : status === 'missing' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-50 text-red-700 border border-red-200">
+                              <span>✕</span>
+                              <span>Missing</span>
+                            </span>
                           ) : (
-                            <div className="flex flex-col items-center gap-2">
-                              <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                              </div>
-                              <span className="text-xs font-medium text-gray-400">Not Marked</span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-white text-slate-400 border border-dashed border-slate-300">
+                              <span>?</span>
+                              <span>Not Marked</span>
+                            </span>
+                          )}
+
+                          {/* Notes snippet if present */}
+                          {notes && (
+                            <div className="mt-2 w-full text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded p-1.5 truncate" title={notes}>
+                              <span className="font-semibold">Note:</span> {notes}
                             </div>
                           )}
                         </div>
-                        </div>
-
-                        {/* Today indicator */}
-                        {isToday && (
-                          <div className="absolute -top-1 -right-1 w-2 h-2 sm:w-3 sm:h-3 bg-yellow-400 rounded-full border-2 border-white"></div>
-                        )}
                       </div>
                     );
                   })}
                 </div>
               </div>
-              {/* Legend - hide on mobile */}
-              <div className="hidden sm:block bg-gray-50 px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-200">
-                <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-6 text-xs sm:text-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-green-100 flex items-center justify-center">
-                      <svg className="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                    <span className="text-gray-700">On Time</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-green-100 flex items-center justify-center">
-                      <svg className="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <span className="text-gray-700">Late (Justified)</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-yellow-100 flex items-center justify-center">
-                      <svg className="w-3 h-3 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <span className="text-gray-700">Late</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-blue-100 flex items-center justify-center">
-                      <svg className="w-3 h-3 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <span className="text-gray-700">Excused</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-red-100 flex items-center justify-center">
-                      <svg className="w-3 h-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </div>
-                    <span className="text-gray-700">Missing</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded-full bg-gray-200 flex items-center justify-center">
-                      <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </div>
-                    <span className="text-gray-700">No {sessionType === 'practice' ? 'Practice' : 'Lift'}</span>
-                  </div>
+
+              {/* Status Color Key Legend */}
+              <div className="bg-slate-50 px-4 sm:px-6 py-3 border-t border-slate-200">
+                <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-6 text-xs font-medium text-slate-600">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> On Time
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-lime-500" /> Late (Justified)
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Late
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Excused
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Missing
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-300" /> No Session
+                  </span>
                 </div>
               </div>
-              
-              {/* Stats Display */}
-              <div className="mt-8 mb-4 px-3 sm:px-6">
+
+              {/* Weekly Stats Summary Row */}
+              <div className="bg-slate-50/70 px-4 sm:px-6 py-3.5 border-t border-slate-200">
                 {(() => {
                   const stats = { onTime: 0, late: 0, lateJustified: 0, excused: 0, missing: 0, notMarked: 0, total: 0 };
                   weekDates.forEach(date => {
@@ -1789,367 +1790,313 @@ export default function CaptainDashboard() {
                   });
                   const percent = (count: number) => stats.total ? ((count / stats.total) * 100).toFixed(0) : '0';
                   return (
-                    <div className="flex flex-wrap justify-center gap-6 bg-white rounded-xl shadow border border-gray-200 p-4">
+                    <div className="flex flex-wrap justify-center gap-4 sm:gap-8 bg-white rounded-xl shadow-xs border border-slate-200 p-3 sm:p-4">
                       <div className="flex flex-col items-center">
-                        <span className="text-green-700 font-bold text-lg">{stats.onTime}</span>
-                        <span className="text-xs text-gray-600">On Time</span>
-                        <span className="text-xs text-green-700">{percent(stats.onTime)}%</span>
+                        <span className="text-emerald-700 font-bold text-base sm:text-lg">{stats.onTime}</span>
+                        <span className="text-xs text-slate-600">On Time</span>
+                        <span className="text-xs text-emerald-700 font-medium">{percent(stats.onTime)}%</span>
                       </div>
                       <div className="flex flex-col items-center">
-                        <span className="text-green-700 font-bold text-lg">{stats.lateJustified}</span>
-                        <span className="text-xs text-gray-600">Late (Justified)</span>
-                        <span className="text-xs text-green-700">{percent(stats.lateJustified)}%</span>
+                        <span className="text-lime-700 font-bold text-base sm:text-lg">{stats.lateJustified}</span>
+                        <span className="text-xs text-slate-600">Late (Justified)</span>
+                        <span className="text-xs text-lime-700 font-medium">{percent(stats.lateJustified)}%</span>
                       </div>
                       <div className="flex flex-col items-center">
-                        <span className="text-yellow-700 font-bold text-lg">{stats.late}</span>
-                        <span className="text-xs text-gray-600">Late</span>
-                        <span className="text-xs text-yellow-700">{percent(stats.late)}%</span>
+                        <span className="text-amber-700 font-bold text-base sm:text-lg">{stats.late}</span>
+                        <span className="text-xs text-slate-600">Late</span>
+                        <span className="text-xs text-amber-700 font-medium">{percent(stats.late)}%</span>
                       </div>
                       <div className="flex flex-col items-center">
-                        <span className="text-blue-700 font-bold text-lg">{stats.excused}</span>
-                        <span className="text-xs text-gray-600">Excused</span>
-                        <span className="text-xs text-blue-700">{percent(stats.excused)}%</span>
+                        <span className="text-blue-700 font-bold text-base sm:text-lg">{stats.excused}</span>
+                        <span className="text-xs text-slate-600">Excused</span>
+                        <span className="text-xs text-blue-700 font-medium">{percent(stats.excused)}%</span>
                       </div>
                       <div className="flex flex-col items-center">
-                        <span className="text-red-700 font-bold text-lg">{stats.missing}</span>
-                        <span className="text-xs text-gray-600">Missing</span>
-                        <span className="text-xs text-red-700">{percent(stats.missing)}%</span>
+                        <span className="text-red-700 font-bold text-base sm:text-lg">{stats.missing}</span>
+                        <span className="text-xs text-slate-600">Missing</span>
+                        <span className="text-xs text-red-700 font-medium">{percent(stats.missing)}%</span>
                       </div>
                       <div className="flex flex-col items-center">
-                        <span className="text-gray-700 font-bold text-lg">{stats.notMarked}</span>
-                        <span className="text-xs text-gray-600">Not Marked</span>
-                        <span className="text-xs text-gray-700">{percent(stats.notMarked)}%</span>
+                        <span className="text-slate-700 font-bold text-base sm:text-lg">{stats.notMarked}</span>
+                        <span className="text-xs text-slate-600">Not Marked</span>
+                        <span className="text-xs text-slate-600 font-medium">{percent(stats.notMarked)}%</span>
                       </div>
                     </div>
                   );
                 })()}
               </div>
+            </div>
 
-              {/* Attendance Calendar Heatmap */}
-              <div className="mt-6 mb-4 px-3 sm:px-6">
-                <div className="bg-white rounded-xl shadow border border-gray-200 p-3 sm:p-4">
-                  <div className="flex flex-col sm:flex-row items-center justify-between mb-3 gap-2">
-                    <h3 className="text-base sm:text-lg font-bold text-gray-800">Attendance Calendar</h3>
-                    <div className="flex items-center gap-1 sm:gap-2">
-                      <button
-                        onClick={goToPreviousMonth}
-                        className="p-1 hover:bg-gray-100 rounded transition-colors"
-                        title="Previous month"
-                      >
-                        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                        </svg>
-                      </button>
-                      <div className="text-center min-w-[140px] sm:min-w-[160px]">
-                        <span className="text-sm sm:text-base font-bold text-gray-800">
-                          {new Date(calendarYear, calendarMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                        </span>
-                      </div>
-                      <button
-                        onClick={goToNextMonth}
-                        className="p-1 hover:bg-gray-100 rounded transition-colors"
-                        title="Next month"
-                      >
-                        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={goToCurrentMonth}
-                        className="px-2 py-1 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-100 rounded transition-colors ml-1"
-                      >
-                        Today
-                      </button>
-                    </div>
-                  </div>
+            {/* Monthly Attendance Calendar Heatmap */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
+                <div>
+                  <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
+                    Monthly Overview
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Full month calendar for {sessionType === 'practice' ? 'Practice' : 'Lift'} attendance.
+                  </p>
+                </div>
 
-                  {/* Calendar Grid */}
-                  <div className="grid grid-cols-7 gap-1">
-                    {/* Day headers */}
-                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                      <div key={day} className="text-center text-[10px] sm:text-xs font-semibold text-gray-600 py-1">
-                        <span className="hidden sm:inline">{day}</span>
-                        <span className="sm:hidden">{day.charAt(0)}</span>
-                      </div>
-                    ))}
-                    
-                    {/* Calendar days */}
-                    {(() => {
-                      const daysInMonth = getDaysInMonth(calendarMonth, calendarYear);
-                      const firstDay = getFirstDayOfMonth(calendarMonth, calendarYear);
-                      const today = new Date();
-                      const days = [];
-                      
-                      // Empty cells before first day
-                      for (let i = 0; i < firstDay; i++) {
-                        days.push(<div key={`empty-${i}`} className="aspect-square"></div>);
-                      }
-                      
-                      // Calendar days
-                      for (let day = 1; day <= daysInMonth; day++) {
-                        const date = new Date(calendarYear, calendarMonth, day);
-                        const dateString = getLocalDateString(date);
-                        const isToday = date.toDateString() === today.toDateString();
-                        const hasScheduledPractice = hasPractice(date);
-                        const status = getAttendanceStatus(user.id, date);
-                        const notes = getAttendanceNotes(user.id, date);
-                        
-                        // Determine background color with better contrast
-                        let bgColor = 'bg-white';
-                        let borderColor = 'border-gray-300';
-                        let borderStyle = '';
-                        let textColor = 'text-gray-800';
-                        
-                        if (!hasScheduledPractice) {
-                          bgColor = 'bg-gray-200';
-                          textColor = 'text-gray-500';
-                          borderColor = 'border-gray-300';
-                        } else if (status === 'on-time' || status === 'late-justified') {
-                          bgColor = 'bg-green-100 hover:bg-green-200';
-                          borderColor = 'border-green-400';
-                          textColor = 'text-green-800';
-                        } else if (status === 'late') {
-                          bgColor = 'bg-yellow-100 hover:bg-yellow-200';
-                          borderColor = 'border-yellow-400';
-                          textColor = 'text-yellow-800';
-                        } else if (status === 'excused') {
-                          bgColor = 'bg-blue-100 hover:bg-blue-200';
-                          borderColor = 'border-blue-400';
-                          textColor = 'text-blue-800';
-                        } else if (status === 'missing') {
-                          bgColor = 'bg-red-100 hover:bg-red-200';
-                          borderColor = 'border-red-400';
-                          textColor = 'text-red-800';
-                        } else {
-                          // Not marked - use dashed border for distinction
-                          bgColor = 'bg-white hover:bg-gray-50';
-                          borderColor = 'border-gray-300';
-                          borderStyle = 'border-dashed';
-                        }
-                        
-                        if (isToday) {
-                          borderColor = 'border-yellow-500';
-                          borderStyle = 'border-2';
-                        }
-                        
-                        days.push(
-                          <div
-                            key={day}
-                            className={`aspect-square border ${borderColor} ${borderStyle} ${bgColor} rounded flex flex-col items-center justify-center transition-all cursor-pointer relative`}
-                            title={`${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}${!hasScheduledPractice ? ' - No practice' : status ? ` - ${status}` : ' - Not marked'}${notes ? `\nNote: ${notes}` : ''}`}
-                          >
-                            <span className={`text-[10px] sm:text-xs font-semibold ${textColor}`}>{day}</span>
-                            {status && hasScheduledPractice && (
-                              <div className={`w-1 h-1 rounded-full mt-0.5 ${
-                                status === 'on-time' || status === 'late-justified' ? 'bg-green-600' :
-                                status === 'late' ? 'bg-yellow-600' :
-                                status === 'excused' ? 'bg-blue-600' :
-                                'bg-red-600'
-                              }`}></div>
-                            )}
-                            {notes && (
-                              <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-yellow-400 rounded-full border border-white"></div>
-                            )}
-                          </div>
-                        );
-                      }
-                      
-                      return days;
-                    })()}
-                  </div>
-
-                  {/* Calendar Legend */}
-                  <div className="mt-3 pt-3 border-t border-gray-200">
-                    <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded bg-green-100 border border-green-400"></div>
-                        <span className="text-gray-700">On Time</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded bg-yellow-100 border border-yellow-400"></div>
-                        <span className="text-gray-700">Late</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded bg-blue-100 border border-blue-400"></div>
-                        <span className="text-gray-700">Excused</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded bg-red-100 border border-red-400"></div>
-                        <span className="text-gray-700">Missing</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded bg-gray-200 border border-gray-300"></div>
-                        <span className="text-gray-700">No Practice</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded bg-white border border-dashed border-gray-300"></div>
-                        <span className="text-gray-700">Not Marked</span>
-                      </div>
-                    </div>
-                  </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={goToPreviousMonth}
+                    className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors cursor-pointer"
+                    title="Previous month"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <span className="text-xs sm:text-sm font-bold text-slate-800 min-w-[130px] text-center">
+                    {new Date(calendarYear, calendarMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  </span>
+                  <button
+                    onClick={goToNextMonth}
+                    className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors cursor-pointer"
+                    title="Next month"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={goToCurrentMonth}
+                    className="px-2 py-1 text-xs font-semibold text-[#182B49] bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors ml-1 cursor-pointer"
+                  >
+                    Today
+                  </button>
                 </div>
               </div>
 
-              {/* Quarter Statistics Section */}
-              {quarters.length > 0 && (
-                <div className="mt-6 border-t pt-6">
-                  <div className="bg-gradient-to-br from-blue-50 via-white to-indigo-50 rounded-2xl shadow-xl border-2 border-blue-100 p-4 sm:p-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                      <h3 className="text-xl sm:text-2xl font-bold text-gray-900">
-                        Quarter Statistics
-                      </h3>
-                      <select
-                        value={selectedQuarter || ''}
-                        onChange={(e) => setSelectedQuarter(e.target.value)}
-                        className="px-4 py-2.5 border-2 border-blue-200 rounded-xl text-sm sm:text-base text-gray-900 font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm hover:shadow-md transition-shadow"
+              {/* Calendar Days Grid */}
+              <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                  <div key={day} className="text-center text-[11px] font-bold text-slate-500 py-1 uppercase tracking-wider">
+                    {day}
+                  </div>
+                ))}
+
+                {(() => {
+                  const daysInMonth = getDaysInMonth(calendarMonth, calendarYear);
+                  const firstDay = getFirstDayOfMonth(calendarMonth, calendarYear);
+                  const today = new Date();
+                  const days = [];
+
+                  for (let i = 0; i < firstDay; i++) {
+                    days.push(<div key={`empty-${i}`} className="aspect-square" />);
+                  }
+
+                  for (let day = 1; day <= daysInMonth; day++) {
+                    const date = new Date(calendarYear, calendarMonth, day);
+                    const isToday = date.toDateString() === today.toDateString();
+                    const hasScheduledPractice = hasPractice(date);
+                    const status = getAttendanceStatus(user.id, date);
+                    const notes = getAttendanceNotes(user.id, date);
+
+                    let cellClass = "bg-white border-slate-200 text-slate-800";
+                    if (!hasScheduledPractice) {
+                      cellClass = "bg-slate-100 border-slate-200 text-slate-400";
+                    } else if (status === 'on-time' || status === 'late-justified') {
+                      cellClass = "bg-emerald-50 border-emerald-200 text-emerald-800";
+                    } else if (status === 'late') {
+                      cellClass = "bg-amber-50 border-amber-200 text-amber-800";
+                    } else if (status === 'excused') {
+                      cellClass = "bg-blue-50 border-blue-200 text-blue-800";
+                    } else if (status === 'missing') {
+                      cellClass = "bg-red-50 border-red-200 text-red-800";
+                    } else {
+                      cellClass = "bg-white border-dashed border-slate-300 text-slate-400";
+                    }
+
+                    days.push(
+                      <div
+                        key={day}
+                        className={`aspect-square border rounded-lg flex flex-col items-center justify-center p-1 text-center relative transition-all ${cellClass} ${
+                          isToday ? 'ring-2 ring-[#FFCD00] font-bold' : ''
+                        }`}
+                        title={`${date.toLocaleDateString()}${status ? `: ${status}` : ''}${notes ? `\n${notes}` : ''}`}
                       >
-                        {quarters.map((quarter) => (
-                          <option key={quarter.id} value={quarter.id}>
-                            {quarter.name} ({new Date(quarter.start_date + 'T00:00:00').toLocaleDateString()} - {new Date(quarter.end_date + 'T00:00:00').toLocaleDateString()})
-                          </option>
-                        ))}
-                      </select>
+                        <span className="text-[11px] sm:text-xs font-semibold">{day}</span>
+                        {status && hasScheduledPractice && (
+                          <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
+                            status === 'on-time' || status === 'late-justified' ? 'bg-emerald-600' :
+                            status === 'late' ? 'bg-amber-600' :
+                            status === 'excused' ? 'bg-blue-600' : 'bg-red-600'
+                          }`} />
+                        )}
+                      </div>
+                    );
+                  }
+                  return days;
+                })()}
+              </div>
+            </div>
+
+            {/* Quarter Statistics Section */}
+            {quarters.length > 0 && (
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold text-slate-900">
+                      Quarter Statistics
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Term performance summary for {sessionType === 'practice' ? 'Practice' : 'Lift'}
+                    </p>
+                  </div>
+                  <select
+                    value={selectedQuarter || ''}
+                    onChange={(e) => setSelectedQuarter(e.target.value)}
+                    className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:border-[#182B49] focus:ring-1 focus:ring-[#182B49]"
+                  >
+                    {quarters.map((quarter) => (
+                      <option key={quarter.id} value={quarter.id}>
+                        {quarter.name} ({new Date(quarter.start_date + 'T00:00:00').toLocaleDateString()} - {new Date(quarter.end_date + 'T00:00:00').toLocaleDateString()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedQuarter && quarterStats && (
+                  <div className="space-y-4 sm:space-y-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4 text-center border border-blue-200">
+                        <div className="text-3xl sm:text-4xl font-bold text-blue-700">
+                          {quarterStats.percentage}%
+                        </div>
+                        <div className="text-xs sm:text-sm text-blue-600 mt-1 font-medium">Attendance Rate</div>
+                      </div>
+                      
+                      <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-4 text-center border border-green-200">
+                        <div className="text-3xl sm:text-4xl font-bold text-green-700">
+                          {quarterStats.attended}
+                        </div>
+                        <div className="text-xs sm:text-sm text-green-600 mt-1 font-medium">{sessionType === 'practice' ? 'Practices' : 'Lifts'} Attended</div>
+                      </div>
+                      
+                      <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4 text-center border border-purple-200">
+                        <div className="text-3xl sm:text-4xl font-bold text-purple-700">
+                          {quarterStats.total}
+                        </div>
+                        <div className="text-xs sm:text-sm text-purple-600 mt-1 font-medium">Total {sessionType === 'practice' ? 'Practices' : 'Lifts'}</div>
+                      </div>
                     </div>
 
-                    {selectedQuarter && quarterStats && (
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl p-5 text-center shadow-lg border-2 border-blue-200 hover:shadow-xl transition-shadow">
-                            <div className="text-3xl sm:text-4xl font-bold text-blue-700">
-                              {quarterStats.percentage}%
-                            </div>
-                            <div className="text-sm font-semibold text-blue-600 mt-1">Attendance Rate</div>
+                    <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-semibold text-slate-600">Progress</span>
+                        <span className="text-xs font-bold text-slate-900">
+                          {quarterStats.attended} / {quarterStats.total}
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-2.5">
+                        <div
+                          className="bg-blue-600 h-2.5 rounded-full"
+                          style={{ width: `${quarterStats.percentage}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {selectedQuarter && !quarterStats && (
+                  <div className="text-center py-8 text-slate-500 text-sm">
+                    Calculating quarter statistics...
+                  </div>
+                )}
+
+                {!selectedQuarter && (
+                  <div className="text-center py-8 text-slate-500 text-sm">
+                    Select a quarter to view statistics
+                  </div>
+                )}
+
+                {selectedQuarter && (
+                  <div className="mt-6 border-t border-slate-200 pt-5 sm:pt-6">
+                    <h4 className="text-base sm:text-lg font-bold text-slate-900 mb-1">Final Quarter Report</h4>
+                    <p className="text-xs sm:text-sm text-slate-500 mb-4">Combined quarter summary across Practice and Lift.</p>
+
+                    {loadingFinalQuarterReport && (
+                      <div className="text-center py-6 text-slate-500 text-sm">Building final report...</div>
+                    )}
+
+                    {!loadingFinalQuarterReport && finalQuarterReport && (
+                      <div className="space-y-3 sm:space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 sm:p-4 text-center">
+                            <div className="text-2xl font-bold text-blue-700">{finalQuarterReport.overall.percentage}%</div>
+                            <div className="text-xs text-blue-700 mt-1 font-medium">Overall Attendance Rate</div>
                           </div>
-                          
-                          <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-2xl p-5 text-center shadow-lg border-2 border-green-200 hover:shadow-xl transition-shadow">
-                            <div className="text-3xl sm:text-4xl font-bold text-green-700">
-                              {quarterStats.attended}
-                            </div>
-                            <div className="text-sm font-semibold text-green-600 mt-1">{sessionType === 'practice' ? 'Practices' : 'Lifts'} Attended</div>
+                          <div className="bg-green-50 border border-green-200 rounded-xl p-3 sm:p-4 text-center">
+                            <div className="text-2xl font-bold text-green-700">{finalQuarterReport.overall.attended}</div>
+                            <div className="text-xs text-green-700 mt-1 font-medium">Total Attended</div>
                           </div>
-                          
-                          <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-2xl p-5 text-center shadow-lg border-2 border-purple-200 hover:shadow-xl transition-shadow">
-                            <div className="text-3xl sm:text-4xl font-bold text-purple-700">
-                              {quarterStats.total}
-                            </div>
-                            <div className="text-sm font-semibold text-purple-600 mt-1">Total {sessionType === 'practice' ? 'Practices' : 'Lifts'}</div>
+                          <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 sm:p-4 text-center">
+                            <div className="text-2xl font-bold text-purple-700">{finalQuarterReport.overall.scheduled}</div>
+                            <div className="text-xs text-purple-700 mt-1 font-medium">Total Scheduled</div>
                           </div>
                         </div>
 
-                        <div className="bg-gray-50 rounded-lg p-4">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-sm text-gray-600">Progress</span>
-                            <span className="text-sm font-semibold text-gray-900">
-                              {quarterStats.attended} / {quarterStats.total}
-                            </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4">
+                            <h5 className="font-semibold text-slate-900 mb-2 text-sm">Practice</h5>
+                            <div className="text-sm text-slate-700">{finalQuarterReport.byType.practice.attended} / {finalQuarterReport.byType.practice.scheduled} attended ({finalQuarterReport.byType.practice.percentage}%)</div>
+                            <div className="text-xs text-slate-500 mt-1">Marked: {finalQuarterReport.byType.practice.marked}/{finalQuarterReport.byType.practice.scheduled} ({finalQuarterReport.byType.practice.coveragePercentage}% coverage)</div>
                           </div>
-                          <div className="w-full bg-gray-200 rounded-full h-3">
-                            <div
-                              className="bg-gradient-to-r from-blue-500 to-blue-600 h-3 rounded-full transition-all duration-500"
-                              style={{ width: `${quarterStats.percentage}%` }}
-                            ></div>
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4">
+                            <h5 className="font-semibold text-slate-900 mb-2 text-sm">Lift</h5>
+                            <div className="text-sm text-slate-700">{finalQuarterReport.byType.lift.attended} / {finalQuarterReport.byType.lift.scheduled} attended ({finalQuarterReport.byType.lift.percentage}%)</div>
+                            <div className="text-xs text-slate-500 mt-1">Marked: {finalQuarterReport.byType.lift.marked}/{finalQuarterReport.byType.lift.scheduled} ({finalQuarterReport.byType.lift.coveragePercentage}% coverage)</div>
                           </div>
                         </div>
-                      </div>
-                    )}
 
-                    {selectedQuarter && !quarterStats && (
-                      <div className="text-center py-8 text-gray-500">
-                        Calculating quarter statistics...
-                      </div>
-                    )}
-
-                    {!selectedQuarter && (
-                      <div className="text-center py-8 text-gray-500">
-                        Select a quarter to view statistics
-                      </div>
-                    )}
-
-                    {selectedQuarter && (
-                      <div className="mt-6 border-t pt-5 sm:pt-6">
-                        <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-1">Final Quarter Report</h4>
-                        <p className="text-xs sm:text-sm text-gray-600 mb-4">Combined quarter summary across Practice and Lift.</p>
-
-                        {loadingFinalQuarterReport && (
-                          <div className="text-center py-6 text-gray-500">Building final report...</div>
-                        )}
-
-                        {!loadingFinalQuarterReport && finalQuarterReport && (
-                          <div className="space-y-3 sm:space-y-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
-                              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4 text-center">
-                                <div className="text-2xl font-bold text-blue-700">{finalQuarterReport.overall.percentage}%</div>
-                                <div className="text-xs text-blue-700 mt-1">Overall Attendance Rate</div>
-                              </div>
-                              <div className="bg-green-50 border border-green-200 rounded-lg p-3 sm:p-4 text-center">
-                                <div className="text-2xl font-bold text-green-700">{finalQuarterReport.overall.attended}</div>
-                                <div className="text-xs text-green-700 mt-1">Total Attended</div>
-                              </div>
-                              <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 sm:p-4 text-center">
-                                <div className="text-2xl font-bold text-purple-700">{finalQuarterReport.overall.scheduled}</div>
-                                <div className="text-xs text-purple-700 mt-1">Total Scheduled</div>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
-                                <h5 className="font-semibold text-gray-900 mb-2">Practice</h5>
-                                <div className="text-sm text-gray-700">{finalQuarterReport.byType.practice.attended} / {finalQuarterReport.byType.practice.scheduled} attended ({finalQuarterReport.byType.practice.percentage}%)</div>
-                                <div className="text-xs text-gray-600 mt-1">Marked: {finalQuarterReport.byType.practice.marked}/{finalQuarterReport.byType.practice.scheduled} ({finalQuarterReport.byType.practice.coveragePercentage}% coverage)</div>
-                              </div>
-                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4">
-                                <h5 className="font-semibold text-gray-900 mb-2">Lift</h5>
-                                <div className="text-sm text-gray-700">{finalQuarterReport.byType.lift.attended} / {finalQuarterReport.byType.lift.scheduled} attended ({finalQuarterReport.byType.lift.percentage}%)</div>
-                                <div className="text-xs text-gray-600 mt-1">Marked: {finalQuarterReport.byType.lift.marked}/{finalQuarterReport.byType.lift.scheduled} ({finalQuarterReport.byType.lift.coveragePercentage}% coverage)</div>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
-                              <div className="bg-green-50 rounded-lg p-2.5 sm:p-3 text-center">
-                                <div className="text-lg font-bold text-green-700">{finalQuarterReport.overall.counts.onTime}</div>
-                                <div className="text-xs text-gray-700">On Time</div>
-                              </div>
-                              <div className="bg-green-50 rounded-lg p-2.5 sm:p-3 text-center">
-                                <div className="text-lg font-bold text-green-700">{finalQuarterReport.overall.counts.lateJustified}</div>
-                                <div className="text-xs text-gray-700">Late (Justified)</div>
-                              </div>
-                              <div className="bg-yellow-50 rounded-lg p-2.5 sm:p-3 text-center">
-                                <div className="text-lg font-bold text-yellow-700">{finalQuarterReport.overall.counts.late}</div>
-                                <div className="text-xs text-gray-700">Late</div>
-                              </div>
-                              <div className="bg-blue-50 rounded-lg p-2.5 sm:p-3 text-center">
-                                <div className="text-lg font-bold text-blue-700">{finalQuarterReport.overall.counts.excused}</div>
-                                <div className="text-xs text-gray-700">Excused</div>
-                              </div>
-                              <div className="bg-red-50 rounded-lg p-2.5 sm:p-3 text-center">
-                                <div className="text-lg font-bold text-red-700">{finalQuarterReport.overall.counts.missing}</div>
-                                <div className="text-xs text-gray-700">Missing</div>
-                              </div>
-                              <div className="bg-gray-100 rounded-lg p-2.5 sm:p-3 text-center">
-                                <div className="text-lg font-bold text-gray-700">{finalQuarterReport.overall.counts.notMarked}</div>
-                                <div className="text-xs text-gray-700">Not Marked</div>
-                              </div>
-                            </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+                          <div className="bg-green-50 rounded-xl p-2.5 sm:p-3 text-center border border-green-200">
+                            <div className="text-lg font-bold text-green-700">{finalQuarterReport.overall.counts.onTime}</div>
+                            <div className="text-xs text-slate-700 font-medium">On Time</div>
                           </div>
-                        )}
+                          <div className="bg-green-50 rounded-xl p-2.5 sm:p-3 text-center border border-green-200">
+                            <div className="text-lg font-bold text-green-700">{finalQuarterReport.overall.counts.lateJustified}</div>
+                            <div className="text-xs text-slate-700 font-medium">Late (Justified)</div>
+                          </div>
+                          <div className="bg-yellow-50 rounded-xl p-2.5 sm:p-3 text-center border border-yellow-200">
+                            <div className="text-lg font-bold text-yellow-700">{finalQuarterReport.overall.counts.late}</div>
+                            <div className="text-xs text-slate-700 font-medium">Late</div>
+                          </div>
+                          <div className="bg-blue-50 rounded-xl p-2.5 sm:p-3 text-center border border-blue-200">
+                            <div className="text-lg font-bold text-blue-700">{finalQuarterReport.overall.counts.excused}</div>
+                            <div className="text-xs text-slate-700 font-medium">Excused</div>
+                          </div>
+                          <div className="bg-red-50 rounded-xl p-2.5 sm:p-3 text-center border border-red-200">
+                            <div className="text-lg font-bold text-red-700">{finalQuarterReport.overall.counts.missing}</div>
+                            <div className="text-xs text-slate-700 font-medium">Missing</div>
+                          </div>
+                          <div className="bg-slate-100 rounded-xl p-2.5 sm:p-3 text-center border border-slate-200">
+                            <div className="text-lg font-bold text-slate-700">{finalQuarterReport.overall.counts.notMarked}</div>
+                            <div className="text-xs text-slate-700 font-medium">Not Marked</div>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
-      </div>
+      </main>
 
       {/* Notes Modal */}
       {showNotesModal && notesModalData && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 p-4" onClick={() => setShowNotesModal(false)}>
-          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-2xl border border-gray-300" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4" onClick={() => setShowNotesModal(false)}>
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Add Note</h3>
+              <h3 className="text-base font-extrabold text-slate-900">Add Attendance Note</h3>
               <button
                 onClick={() => setShowNotesModal(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -2157,46 +2104,42 @@ export default function CaptainDashboard() {
               </button>
             </div>
             
-            <div className="mb-4">
-              <p className="text-sm text-gray-800 mb-2">
-                <span className="font-medium">{notesModalData.athleteName}</span> - {formatDate(notesModalData.date)}
-              </p>
-              <p className="text-xs text-gray-700 mb-4">
-                Status: <span className={`font-medium ${
-                  notesModalData.status === 'on-time' || notesModalData.status === 'late-justified' ? 'text-green-600' :
-                  notesModalData.status === 'late' ? 'text-yellow-600' :
-                  notesModalData.status === 'excused' ? 'text-blue-600' :
-                  'text-red-600'
-                }`}>
-                  {notesModalData.status === 'on-time' ? 'On Time' :
-                   notesModalData.status === 'late' ? 'Late' :
-                   notesModalData.status === 'late-justified' ? 'Late (Justified)' :
-                   notesModalData.status === 'excused' ? 'Excused' :
-                   'Missing'}
-                </span>
-              </p>
+            <div className="space-y-3 mb-5">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <p className="text-xs font-bold text-slate-900">
+                  {notesModalData.athleteName}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Date: {formatDate(notesModalData.date)} • Target Status: <span className="font-semibold text-slate-700 capitalize">{notesModalData.status}</span>
+                </p>
+              </div>
               
-              <textarea
-                value={attendanceNotes}
-                onChange={(e) => setAttendanceNotes(e.target.value)}
-                placeholder="Add a note (e.g., injury, class conflict, etc.)"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm text-gray-900"
-                rows={4}
-              />
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                  Note Details
+                </label>
+                <textarea
+                  value={attendanceNotes}
+                  onChange={(e) => setAttendanceNotes(e.target.value)}
+                  placeholder="e.g. excused for midterms, late due to lab conflict, injury..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:ring-1 focus:ring-[#182B49] focus:border-[#182B49] text-xs text-slate-900 placeholder:text-slate-400"
+                  rows={4}
+                />
+              </div>
             </div>
             
             <div className="flex gap-2">
               <button
                 onClick={() => setShowNotesModal(false)}
-                className="flex-1 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-medium transition-colors"
+                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={submitAttendanceWithNotes}
-                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+                className="flex-1 px-4 py-2 bg-[#182B49] hover:bg-[#1f375d] text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
-                Submit
+                Save Note
               </button>
             </div>
           </div>
